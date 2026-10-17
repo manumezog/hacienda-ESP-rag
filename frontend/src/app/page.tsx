@@ -332,9 +332,9 @@ const UI_TEXT = {
 const PETETE_OFFICIAL_URL =
   "https://petete.tributos.hacienda.gob.es/consultas";
 
-// URL del Backend leída internamente de las variables de entorno (sin exponer IPs en la UI)
+// URL oficial del Backend en la Jetson Orin expuesta vía Cloudflare Tunnel HTTPS
 const BACKEND_API_URL = (
-  process.env.NEXT_PUBLIC_API_URL || "http://192.168.1.194:8000"
+  process.env.NEXT_PUBLIC_API_URL || "https://api-hacienda.mezapps.com"
 ).replace(/\/+$/, "");
 
 export default function MatryoshkaBenchmarkPage() {
