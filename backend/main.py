@@ -352,6 +352,8 @@ async def search_consultas(req: SearchRequest):
     embedding_ms = (time.perf_counter() - t0) * 1000
 
     # 3. Búsqueda vectorial en Supabase (RPC match_documents)
+    # Solicitamos un margen extra (top_k * 4) para deduplicar por num_consulta
+    # y garantizar que el Top-K final contenga siempre K consultas vinculantes distintas.
     t1 = time.perf_counter()
     supabase = get_supabase()
     try:
@@ -360,10 +362,19 @@ async def search_consultas(req: SearchRequest):
             {
                 "query_embedding": truncated_vector,
                 "match_dimensions": req.dimensions,
-                "match_count": req.top_k,
+                "match_count": min(req.top_k * 4, 60),
             },
         ).execute()
-        matches = rpc_response.data or []
+        raw_matches = rpc_response.data or []
+        seen_consultas = set()
+        matches = []
+        for m in raw_matches:
+            num_c = m.get("num_consulta")
+            if num_c and num_c not in seen_consultas:
+                seen_consultas.add(num_c)
+                matches.append(m)
+                if len(matches) >= req.top_k:
+                    break
     except Exception as exc:
         raise HTTPException(
             status_code=502,
