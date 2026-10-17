@@ -257,23 +257,27 @@ async def generate_llm_response(query: str, docs: List[HydratedDocument]) -> Opt
                 return resp.json()["choices"][0]["message"]["content"]
 
     if GEMINI_API_KEY:
+        gemini_models = ["gemini-2.5-flash", "gemini-2.0-flash"]
         async with httpx.AsyncClient(timeout=45.0) as client:
-            resp = await client.post(
-                f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}",
-                json={
-                    "contents": [
-                        {
-                            "parts": [
-                                {"text": f"{system_prompt}\n\nPregunta: {query}\n\nContexto DGT:\n{context_text}"}
-                            ]
-                        }
-                    ]
-                },
-            )
-            if resp.status_code == 200:
-                candidates = resp.json().get("candidates", [])
-                if candidates:
-                    return candidates[0]["content"]["parts"][0]["text"]
+            for g_model in gemini_models:
+                resp = await client.post(
+                    f"https://generativelanguage.googleapis.com/v1beta/models/{g_model}:generateContent?key={GEMINI_API_KEY}",
+                    json={
+                        "contents": [
+                            {
+                                "parts": [
+                                    {"text": f"{system_prompt}\n\nPregunta: {query}\n\nContexto DGT:\n{context_text}"}
+                                ]
+                            }
+                        ],
+                        "generationConfig": {"temperature": 0.1},
+                    },
+                )
+                if resp.status_code == 200:
+                    candidates = resp.json().get("candidates", [])
+                    if candidates:
+                        return candidates[0]["content"]["parts"][0]["text"]
+
 
     return None
 
