@@ -12,7 +12,6 @@ import {
   ChevronDown,
   ChevronUp,
   Sparkles,
-  Settings,
   AlertCircle,
   BookOpen,
   ExternalLink,
@@ -26,6 +25,7 @@ import {
 } from "lucide-react";
 
 type DimensionOption = 128 | 256 | 512;
+type Lang = "es" | "en";
 
 interface HydratedDocument {
   chunk_id: string;
@@ -59,91 +59,109 @@ interface SearchResponse {
 }
 
 interface SampleCategory {
-  category: string;
-  items: { label: string; query: string }[];
+  categoryEs: string;
+  categoryEn: string;
+  items: { labelEs: string; labelEn: string; query: string }[];
 }
 
 const SAMPLE_CATEGORIES: SampleCategory[] = [
   {
-    category: "🏠 IRPF y Vivienda",
+    categoryEs: "🏠 IRPF y Vivienda",
+    categoryEn: "🏠 Income Tax (IRPF) & Housing",
     items: [
       {
-        label: "Reinversión en vivienda habitual comprando antes de vender",
+        labelEs: "Reinversión en vivienda habitual comprando antes de vender",
+        labelEn: "Main home reinvestment exemption when buying before selling",
         query:
           "Exención por reinversión en vivienda habitual en el IRPF cuando se compra la nueva vivienda antes de vender la anterior",
       },
       {
-        label: "Deducción por obras de eficiencia energética en vivienda",
+        labelEs: "Deducción por obras de eficiencia energética en vivienda",
+        labelEn: "Tax deduction for home energy efficiency renovation works",
         query:
           "Requisitos y base máxima de la deducción por obras de mejora de la eficiencia energética en viviendas en el IRPF",
       },
       {
-        label: "Indemnización por despido improcedente y límites de exención",
+        labelEs: "Indemnización por despido improcedente y límites de exención",
+        labelEn: "Severance pay tax exemption limits for unfair dismissal",
         query:
           "Exención en el IRPF de la indemnización por despido improcedente y requisitos de desvinculación con la empresa",
       },
     ],
   },
   {
-    category: "🧾 IVA, Autónomos y Consumo",
+    categoryEs: "🧾 IVA, Autónomos y Consumo",
+    categoryEn: "🧾 VAT (IVA), Freelancers & Consumption",
     items: [
       {
-        label: "Tipo de IVA en servicios de artistas, cantantes y animación",
+        labelEs: "Tipo de IVA en servicios de artistas, cantantes y animación",
+        labelEn: "Applicable VAT rate for performers, singers, and entertainers",
         query:
           "Tipo impositivo de IVA aplicable a los servicios prestados por animadores de fiestas infantiles y cantantes en eventos",
       },
       {
-        label: "Traspaso de negocio completo (No sujeción a IVA art. 7.1º)",
+        labelEs: "Traspaso de negocio completo (No sujeción a IVA art. 7.1º)",
+        labelEn: "Transfer of a going concern (VAT non-subjection rule art. 7.1)",
         query:
           "Transmisión de un conjunto empresarial o rama de actividad y supuesto de no sujeción al IVA del artículo 7.1 de la Ley 37/1992",
       },
       {
-        label: "Deducción de gastos de vehículo y combustible en autónomos",
+        labelEs: "Deducción de gastos de vehículo y combustible en autónomos",
+        labelEn: "VAT deduction on car and fuel expenses for self-employed",
         query:
           "Porcentaje de deducción del IVA soportado en la adquisición y combustible de un vehículo turismo utilizado por un profesional autónomo",
       },
     ],
   },
   {
-    category: "🏢 Impuesto sobre Sociedades y Startups",
+    categoryEs: "🏢 Impuesto sobre Sociedades y Startups",
+    categoryEn: "🏢 Corporate Tax & Startups",
     items: [
       {
-        label: "Tipo reducido del 15% para Startups certificadas por ENISA",
+        labelEs: "Tipo reducido del 15% para Startups certificadas por ENISA",
+        labelEn: "15% reduced Corporate Tax rate for ENISA-certified Startups",
         query:
           "Aplicación del tipo impositivo reducido del 15% en el Impuesto sobre Sociedades para empresa emergente certificada por ENISA en grupo fiscal",
       },
       {
-        label: "Exención por dividendos y venta de participaciones (art. 21 LIS)",
+        labelEs: "Exención por dividendos y venta de participaciones (art. 21 LIS)",
+        labelEn: "Participation exemption on dividends and capital gains (art. 21)",
         query:
           "Requisitos de participación mínima y mantenimiento de 1 año para la exención sobre dividendos del artículo 21 de la Ley del Impuesto sobre Sociedades",
       },
     ],
   },
   {
-    category: "🏛️ Patrimonio, Sucesiones y Donaciones",
+    categoryEs: "🏛️ Patrimonio, Sucesiones y Donaciones",
+    categoryEn: "🏛️ Wealth, Inheritance & Gift Tax",
     items: [
       {
-        label: "Exención de empresa familiar en el Impuesto sobre el Patrimonio",
+        labelEs: "Exención de empresa familiar en el Impuesto sobre el Patrimonio",
+        labelEn: "Family business exemption in Spanish Wealth Tax (art. 4.Ocho)",
         query:
           "Exención en el Impuesto sobre el Patrimonio del artículo 4.Ocho.Dos por participaciones en entidades y activos afectos a la actividad económica",
       },
       {
-        label: "Donación de derechos o participaciones de padres a hijos",
+        labelEs: "Donación de derechos o participaciones de padres a hijos",
+        labelEn: "Taxation of gifts and rights transferred from parents to children",
         query:
           "Tributación y valoración en el Impuesto sobre Sucesiones y Donaciones de la cesión gratuita o donación de derechos de padres a hijos",
       },
     ],
   },
   {
-    category: "🌍 Criptomonedas y Fiscalidad Internacional",
+    categoryEs: "🌍 Criptomonedas y Fiscalidad Internacional",
+    categoryEn: "🌍 Crypto Assets & International Tax (Beckham Law)",
     items: [
       {
-        label: "Pérdidas por estafas o quiebras en plataformas de criptomonedas",
+        labelEs: "Pérdidas por estafas o quiebras en plataformas de criptomonedas",
+        labelEn: "Capital losses from crypto exchange bankruptcy or fraud",
         query:
           "Imputación temporal en el IRPF de pérdidas patrimoniales derivadas de estafas o insolvencia de plataformas de inversión o criptoactivos",
       },
       {
-        label: "Régimen especial de impatriados (Ley Beckham art. 93 LIRPF)",
+        labelEs: "Régimen especial de impatriados (Ley Beckham art. 93 LIRPF)",
+        labelEn: "Special expat tax regime in Spain (Beckham Law art. 93)",
         query:
           "Requisitos para acogerse al régimen especial de trabajadores desplazados a territorio español del artículo 93 de la LIRPF",
       },
@@ -151,22 +169,186 @@ const SAMPLE_CATEGORIES: SampleCategory[] = [
   },
 ];
 
+const UI_TEXT = {
+  es: {
+    badge: "Laboratorio Educativo RAG & Matryoshka AI",
+    subtitlePrefix: "Buscador inteligente sobre",
+    subtitleStrong: "36.053 Consultas Vinculantes",
+    subtitleSuffix: "de la Dirección General de Tributos (Hacienda Española)",
+    hideGuide: "Ocultar explicación",
+    showGuide: "¿Cómo funciona esto?",
+    aiSynthesisToggle: "Redactar respuesta con IA",
+    eduTag: "Guía rápida para entender el experimento",
+    eduTitle:
+      "¿Cómo ahorrar un 83% de memoria en Inteligencia Artificial sin perder precisión legal?",
+    card1Title: "1. ¿Qué es un RAG Legal?",
+    card1Body:
+      "Si le preguntas una duda de impuestos a una IA normal, puede inventarse leyes. Un sistema RAG evita esto: primero busca en las 36.053 resoluciones oficiales de Hacienda los casos reales más parecidos al tuyo y obliga a la IA a responder basándose solo en ellos.",
+    card2Title: "2. El Efecto “Muñeca Rusa” (Matryoshka MRL)",
+    card2Body:
+      "Para buscar por significado, la IA traduce cada ley a una lista de 768 números (vector). Los modelos Matryoshka concentran la información más importante al principio de la lista. Así podemos recortar y usar solo los primeros 128 números (un 83% menos de memoria) llegando casi a la misma conclusión.",
+    card3Title: "3. Casa + Nube (Hidratación Local)",
+    card3Body:
+      "Las 36.053 leyes ocupan más de 1 GB. Para no pagar servidores caros en la nube, guardamos solo los números ligeros en la nube (Supabase) y leemos los textos completos en 1 milisegundo desde un mini-servidor NVIDIA Jetson Orin local.",
+    visualizerTitle: (dim: number, pct: number) =>
+      `🪆 Visualizador de Recorte Matryoshka (${dim} de 768 números activos = ${pct}% del tamaño original)`,
+    visualizerDesc:
+      "Cambia entre 128D, 256D y 512D en el panel derecho para ver qué fracción del vector estamos usando frente al vector completo de 768 números:",
+    visualizerDiscarded: (saved: number) =>
+      `Resto descartado (-${saved}% memoria)`,
+    posStart: "Posición 1 (Conceptos clave)",
+    posEnd: "768 (Matices secundarios)",
+    sampleLabel: "Prueba con un caso fiscal real:",
+    samplePlaceholder:
+      "-- Selecciona una pregunta de ejemplo por tipo de impuesto --",
+    searchPlaceholder:
+      "O escribe aquí tu propia duda fiscal (IRPF, IVA, Sociedades, Sucesiones, Alquileres, Cripto...)",
+    searchingBtn: "Consultando en paralelo...",
+    searchBtn: "Comparar Ambos Modelos",
+    metricMatchTitle: "Coincidencia de Documentos",
+    metricMatchSub: (m: number, t: number) => `(${m} de ${t} leyes idénticas)`,
+    metricRamTitle: "Memoria Ahorrada en la Nube",
+    metricRamSub: (dim: number) => `(${dim} vs 768 números)`,
+    metricCloudTitle: "Tiempo de Búsqueda Vectorial",
+    metricDiskTitle: "Lectura de Leyes (Disco Local)",
+    metricDiskSub: "(Instantáneo desde SQLite)",
+    leftPanelTitle: "Búsqueda Estándar (Vector Completo: 768 números)",
+    leftPanelSub:
+      "Usa el 100% del tamaño del vector · Mayor consumo de memoria",
+    leftPanelBadge: "768D (100% Memoria)",
+    leftAiTitle: "Conclusión IA con Vector Completo (768D)",
+    rightPanelTitle: (dim: number) => `Búsqueda Matryoshka (${dim} números)`,
+    rightPanelBadge: (saved: number) => `Ahorra ${saved}% RAM`,
+    rightPanelSub: (pct: number) =>
+      `Usa solo el ${pct}% inicial del vector descartando el resto`,
+    rightAiTitle: (dim: number) =>
+      `Conclusión IA con Vector Reducido (${dim}D)`,
+    clickCitationHint:
+      "Haz clic en cualquier consulta citada (ej. V0703-26) para abrir la ley",
+    recoveredDocsHeader: (n: number) =>
+      `Consultas Vinculantes Oficiales Recuperadas (${n})`,
+    emptyLeft:
+      "Selecciona un caso fiscal arriba o escribe tu consulta para comparar ambos motores.",
+    emptyRight:
+      "Elige el nivel de recorte (128D, 256D o 512D) y lanza una búsqueda para comparar con el vector completo.",
+    sameAs768: "Mismo resultado que 768D",
+    affinity: "Afinidad:",
+    organoLabel: "Órgano DGT:",
+    questionLabel: "Cuestión Planteada (Original ES):",
+    hideQuickText: "Ocultar texto rápido",
+    showQuickText: "Desplegar resolución aquí",
+    openFullModal: "Abrir visor completo y web oficial DGT",
+    factsTitle: "Descripción de los Hechos",
+    rulingTitle: "Contestación Vinculante Íntegra (DGT)",
+    modalDate: "Fecha Salida:",
+    copiedCode: (c: string) => `Código ${c} copiado`,
+    copyCode: "Copiar código",
+    verifyOfficialWeb: "Verificar en Web Oficial Hacienda (PETETE)",
+    modalOrgano: "Órgano Directivo Emisor:",
+    modalNormativa: "Normativa Aplicable:",
+    footerAuthor: "Proyecto educativo open-source desarrollado por",
+    footerSourceLabel: "Fuente de datos oficial: DGT (Ministerio de Hacienda)",
+  },
+  en: {
+    badge: "Educational RAG & Matryoshka AI Lab",
+    subtitlePrefix: "Intelligent legal search across",
+    subtitleStrong: "36,053 Binding Tax Rulings",
+    subtitleSuffix: "from the Spanish Tax Agency (Dirección General de Tributos)",
+    hideGuide: "Hide explanation",
+    showGuide: "How does this work?",
+    aiSynthesisToggle: "Generate AI Summary (in English)",
+    eduTag: "Quick guide to understand this experiment",
+    eduTitle:
+      "How to save 83% of Vector RAM in AI without losing legal accuracy?",
+    card1Title: "1. What is Legal RAG?",
+    card1Body:
+      "If you ask a standard AI a tax question, it can hallucinate laws. A RAG system prevents this: it first searches across 36,053 official Spanish Tax Rulings to find the closest real cases, forcing the AI to answer strictly based on official rulings.",
+    card2Title: "2. The “Russian Doll” Effect (Matryoshka MRL)",
+    card2Body:
+      "To search by meaning, AI converts each law into a list of 768 numbers (vector). Matryoshka models pack the most critical meaning into the very first numbers. This lets us slice and keep only the first 128 numbers (saving 83% of RAM) while reaching nearly the exact same legal answer.",
+    card3Title: "3. Edge + Cloud (Local Hydration Pattern)",
+    card3Body:
+      "The 36,053 full rulings take over 1 GB. To avoid paying for expensive cloud storage, we store only the lightweight vectors in the cloud (Supabase) and hydrate the full legal texts in 1 millisecond from a local NVIDIA Jetson Orin server.",
+    visualizerTitle: (dim: number, pct: number) =>
+      `🪆 Matryoshka Vector Slicing Visualizer (${dim} of 768 active numbers = ${pct}% of original size)`,
+    visualizerDesc:
+      "Switch between 128D, 256D, and 512D on the right panel to see what fraction of the vector is used compared to the full 768-number vector:",
+    visualizerDiscarded: (saved: number) =>
+      `Remaining sliced off (-${saved}% memory)`,
+    posStart: "Index 1 (Core concepts)",
+    posEnd: "768 (Fine-grained nuances)",
+    sampleLabel: "Try a real Spanish tax case:",
+    samplePlaceholder: "-- Select a sample tax question by category --",
+    searchPlaceholder:
+      "Or type your own tax query (Income Tax, VAT, Corporate Tax, Startups, Crypto, Beckham Law...)",
+    searchingBtn: "Running parallel benchmark...",
+    searchBtn: "Compare Side-by-Side",
+    metricMatchTitle: "Document Overlap (Recall)",
+    metricMatchSub: (m: number, t: number) => `(${m} of ${t} identical rulings)`,
+    metricRamTitle: "Cloud Vector RAM Saved",
+    metricRamSub: (dim: number) => `(${dim} vs 768 dimensions)`,
+    metricCloudTitle: "Cloud Vector Search Time",
+    metricDiskTitle: "Local Disk Hydration (SQLite)",
+    metricDiskSub: "(Instant from local Edge DB)",
+    leftPanelTitle: "Standard RAG (Full Vector: 768 numbers)",
+    leftPanelSub: "Uses 100% of vector dimensions · High memory footprint",
+    leftPanelBadge: "768D (100% Memory)",
+    leftAiTitle: "AI Legal Conclusion — Full Vector (768D)",
+    rightPanelTitle: (dim: number) => `Matryoshka RAG (${dim} numbers)`,
+    rightPanelBadge: (saved: number) => `Saves ${saved}% RAM`,
+    rightPanelSub: (pct: number) =>
+      `Uses only the first ${pct}% of the vector, discarding the rest`,
+    rightAiTitle: (dim: number) =>
+      `AI Legal Conclusion — Sliced Vector (${dim}D)`,
+    clickCitationHint:
+      "Click any cited ruling code (e.g., V0703-26) to inspect the official Spanish text",
+    recoveredDocsHeader: (n: number) =>
+      `Retrieved Official Tax Rulings (${n} — Original Spanish DGT Text)`,
+    emptyLeft:
+      "Select a sample tax case above or type a query to benchmark both engines side-by-side.",
+    emptyRight:
+      "Choose a slicing level (128D, 256D, or 512D) and run a search to compare against the full 768D vector.",
+    sameAs768: "Exact match with 768D",
+    affinity: "Similarity:",
+    organoLabel: "Issuing Body:",
+    questionLabel: "Legal Question (Original Spanish):",
+    hideQuickText: "Hide quick preview",
+    showQuickText: "Expand ruling preview here",
+    openFullModal: "Open full viewer & official DGT portal",
+    factsTitle: "Description of Facts (Original Spanish)",
+    rulingTitle: "Full Binding Tax Ruling (Original Spanish DGT)",
+    modalDate: "Issue Date:",
+    copiedCode: (c: string) => `Code ${c} copied`,
+    copyCode: "Copy ID",
+    verifyOfficialWeb: "Verify on Official Spanish Tax Portal (PETETE)",
+    modalOrgano: "Issuing Tax Authority:",
+    modalNormativa: "Applicable Legislation:",
+    footerAuthor: "Open-source educational project built by",
+    footerSourceLabel:
+      "Official Data Source: DGT (Spanish Ministry of Finance)",
+  },
+};
+
 const PETETE_OFFICIAL_URL =
   "https://petete.tributos.hacienda.gob.es/consultas";
 
+// URL del Backend leída internamente de las variables de entorno (sin exponer IPs en la UI)
+const BACKEND_API_URL = (
+  process.env.NEXT_PUBLIC_API_URL || "http://192.168.1.194:8000"
+).replace(/\/+$/, "");
+
 export default function MatryoshkaBenchmarkPage() {
-  const [apiUrl, setApiUrl] = useState<string>(
-    process.env.NEXT_PUBLIC_API_URL || "http://192.168.1.194:8000"
-  );
+  const [lang, setLang] = useState<Lang>("es");
+  const t = UI_TEXT[lang];
+
   const [query, setQuery] = useState<string>(
     SAMPLE_CATEGORIES[0].items[0].query
   );
   const [mrlDimension, setMrlDimension] = useState<DimensionOption>(128);
-  const [topK, setTopK] = useState<number>(5);
+  const [topK] = useState<number>(5);
   const [generateAnswer, setGenerateAnswer] = useState<boolean>(true);
 
   const [showEduGuide, setShowEduGuide] = useState<boolean>(true);
-  const [showTechSettings, setShowTechSettings] = useState<boolean>(false);
   const [selectedDocModal, setSelectedDocModal] =
     useState<HydratedDocument | null>(null);
 
@@ -179,17 +361,16 @@ export default function MatryoshkaBenchmarkPage() {
 
   const runParallelSearch = async (
     searchQuery: string = query,
-    targetMrlDim: DimensionOption = mrlDimension
+    targetMrlDim: DimensionOption = mrlDimension,
+    targetLang: Lang = lang
   ) => {
     if (!searchQuery.trim()) return;
     setErrorMsg(null);
     setLoadingLeft(true);
     setLoadingRight(true);
 
-    const baseUrl = apiUrl.replace(/\/+$/, "");
-
     const fetchPanel = async (dimensions: number): Promise<SearchResponse> => {
-      const res = await fetch(`${baseUrl}/api/search`, {
+      const res = await fetch(`${BACKEND_API_URL}/api/search`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -197,13 +378,12 @@ export default function MatryoshkaBenchmarkPage() {
           dimensions,
           top_k: topK,
           generate_answer: generateAnswer,
+          lang: targetLang,
         }),
       });
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
-        throw new Error(
-          errData.detail || `Error HTTP ${res.status} al conectar con ${baseUrl}`
-        );
+        throw new Error(errData.detail || `HTTP Error ${res.status}`);
       }
       return res.json();
     };
@@ -221,7 +401,9 @@ export default function MatryoshkaBenchmarkPage() {
     } catch (err: any) {
       setErrorMsg(
         err.message ||
-          "No se pudo conectar con el servidor de IA. Revisa los ajustes técnicos (⚙️)."
+          (targetLang === "en"
+            ? "Could not connect to the AI Backend."
+            : "No se pudo conectar con el servidor de IA.")
       );
     }
   };
@@ -229,11 +411,18 @@ export default function MatryoshkaBenchmarkPage() {
   const handleDimensionChange = (dim: DimensionOption) => {
     setMrlDimension(dim);
     if (tradResult && query.trim()) {
-      runParallelSearch(query, dim);
+      runParallelSearch(query, dim, lang);
     }
   };
 
-  // Mapa rápido de todos los documentos cargados para abrirlos al clicar una cita (ej. V0703-26)
+  const handleLanguageChange = (newLang: Lang) => {
+    if (newLang === lang) return;
+    setLang(newLang);
+    if (tradResult && query.trim()) {
+      runParallelSearch(query, mrlDimension, newLang);
+    }
+  };
+
   const allLoadedDocsMap = React.useMemo(() => {
     const map = new Map<string, HydratedDocument>();
     tradResult?.results.forEach((d) => map.set(d.num_consulta.toUpperCase(), d));
@@ -284,20 +473,44 @@ export default function MatryoshkaBenchmarkPage() {
                   hacienda-ESP-rag
                 </h1>
                 <span className="text-[11px] font-medium px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
-                  Laboratorio Educativo RAG & Matryoshka AI
+                  {t.badge}
                 </span>
               </div>
               <p className="text-xs text-slate-400">
-                Buscador inteligente sobre{" "}
-                <strong className="text-slate-200">
-                  36.053 Consultas Vinculantes
-                </strong>{" "}
-                de la Dirección General de Tributos (Hacienda Española)
+                {t.subtitlePrefix}{" "}
+                <strong className="text-slate-200">{t.subtitleStrong}</strong>{" "}
+                {t.subtitleSuffix}
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2.5 text-xs">
+          <div className="flex flex-wrap items-center gap-2.5 text-xs">
+            {/* Selector de Idioma ES / EN */}
+            <div className="flex items-center bg-slate-950 p-1 rounded-lg border border-slate-800">
+              <button
+                type="button"
+                onClick={() => handleLanguageChange("es")}
+                className={`px-2.5 py-1 rounded-md font-semibold transition flex items-center gap-1 ${
+                  lang === "es"
+                    ? "bg-emerald-500 text-slate-950 shadow"
+                    : "text-slate-400 hover:text-slate-200"
+                }`}
+              >
+                🇪🇸 ES
+              </button>
+              <button
+                type="button"
+                onClick={() => handleLanguageChange("en")}
+                className={`px-2.5 py-1 rounded-md font-semibold transition flex items-center gap-1 ${
+                  lang === "en"
+                    ? "bg-emerald-500 text-slate-950 shadow"
+                    : "text-slate-400 hover:text-slate-200"
+                }`}
+              >
+                🇬🇧 EN
+              </button>
+            </div>
+
             <button
               type="button"
               onClick={() => setShowEduGuide(!showEduGuide)}
@@ -308,7 +521,7 @@ export default function MatryoshkaBenchmarkPage() {
               }`}
             >
               <BookOpen className="w-3.5 h-3.5" />
-              {showEduGuide ? "Ocultar explicación" : "¿Cómo funciona esto?"}
+              {showEduGuide ? t.hideGuide : t.showGuide}
             </button>
 
             <label className="flex items-center gap-2 bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 cursor-pointer hover:border-slate-700">
@@ -320,168 +533,115 @@ export default function MatryoshkaBenchmarkPage() {
               />
               <Sparkles className="w-3.5 h-3.5 text-amber-400" />
               <span className="text-slate-200 font-medium">
-                Redactar respuesta con IA
+                {t.aiSynthesisToggle}
               </span>
             </label>
-
-            <button
-              type="button"
-              onClick={() => setShowTechSettings(!showTechSettings)}
-              title="Ajustes técnicos del servidor"
-              className="p-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-400 hover:text-white hover:border-slate-700 transition"
-            >
-              <Settings className="w-4 h-4" />
-            </button>
           </div>
         </div>
-
-        {/* Panel desplegable de Ajustes Técnicos (Oculto por defecto) */}
-        {showTechSettings && (
-          <div className="border-t border-slate-800 bg-slate-950/95 px-6 py-3">
-            <div className="max-w-[1550px] mx-auto flex flex-wrap items-center justify-between gap-4 text-xs">
-              <div className="flex flex-wrap items-center gap-4">
-                <div className="flex items-center gap-2">
-                  <span className="text-slate-400">
-                    Servidor Backend (Jetson Orin / Tunnel):
-                  </span>
-                  <input
-                    type="text"
-                    value={apiUrl}
-                    onChange={(e) => setApiUrl(e.target.value)}
-                    className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1 text-slate-200 font-mono w-64 focus:outline-none focus:border-emerald-500"
-                  />
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-slate-400">
-                    Nº de documentos a comparar (Top-K):
-                  </span>
-                  <select
-                    value={topK}
-                    onChange={(e) => setTopK(Number(e.target.value))}
-                    className="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-slate-200 font-mono"
-                  >
-                    <option value={3}>3 documentos</option>
-                    <option value={5}>5 documentos</option>
-                    <option value={10}>10 documentos</option>
-                  </select>
-                </div>
-              </div>
-              <span className="text-slate-500">
-                Modelo Embeddings: EmbeddingGemma · LLM: Gemini 3.8 Flash
-              </span>
-            </div>
-          </div>
-        )}
       </header>
 
-      {/* ==================== GUÍA EDUCATIVA INICIAL ==================== */}
-      {showEduGuide && (
-        <section className="border-b border-slate-800/80 bg-gradient-to-b from-emerald-950/20 via-slate-900/40 to-slate-950 px-6 py-6">
-          <div className="max-w-[1550px] mx-auto space-y-5">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div>
-                <span className="text-xs font-semibold uppercase tracking-wider text-emerald-400">
-                  Guía rápida para entender el experimento
-                </span>
-                <h2 className="text-xl md:text-2xl font-bold text-white mt-0.5">
-                  ¿Cómo ahorrar un 83% de memoria en Inteligencia Artificial sin
-                  perder precisión legal?
-                </h2>
-              </div>
+      {/* ==================== HERO PRINCIPAL Y GUÍA EDUCATIVA ==================== */}
+      <section className="border-b border-slate-800/80 bg-gradient-to-b from-emerald-950/25 via-slate-900/50 to-slate-950 px-6 pt-7 pb-6">
+        <div className="max-w-[1550px] mx-auto space-y-5">
+          {/* Título Principal Prominente (Siempre visible) */}
+          <div className="space-y-2">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-semibold">
+              <span>🪆 {t.eduTag}</span>
             </div>
+            <h2 className="text-2xl sm:text-3xl lg:text-4xl font-extrabold tracking-tight text-white leading-tight">
+              {lang === "es" ? (
+                <>
+                  Buscador inteligente sobre{" "}
+                  <span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-teal-300">
+                    36.053 Consultas Vinculantes
+                  </span>{" "}
+                  de la Dirección General de Tributos (Hacienda Española)
+                </>
+              ) : (
+                <>
+                  Intelligent Search Engine across{" "}
+                  <span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-teal-300">
+                    36,053 Binding Tax Rulings
+                  </span>{" "}
+                  from the Spanish Tax Agency (Hacienda)
+                </>
+              )}
+            </h2>
+            <p className="text-sm sm:text-base text-slate-300 max-w-4xl">
+              {t.eduTitle}
+            </p>
+          </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {/* Tarjeta 1: Qué es RAG */}
-              <div className="rounded-xl border border-slate-800 bg-slate-900/70 p-4 space-y-2">
-                <div className="flex items-center gap-2 text-blue-400 font-semibold text-sm">
-                  <Scale className="w-4 h-4" />
-                  1. ¿Qué es un RAG Legal?
+          {showEduGuide && (
+            <>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-1">
+                <div className="rounded-xl border border-slate-800 bg-slate-900/70 p-4 space-y-2">
+                  <div className="flex items-center gap-2 text-blue-400 font-semibold text-sm">
+                    <Scale className="w-4 h-4" />
+                    {t.card1Title}
+                  </div>
+                  <p className="text-xs text-slate-300 leading-relaxed">
+                    {t.card1Body}
+                  </p>
                 </div>
-                <p className="text-xs text-slate-300 leading-relaxed">
-                  Si le preguntas una duda de impuestos a una IA normal, puede{" "}
-                  <strong>inventarse leyes</strong>. Un sistema{" "}
-                  <strong>RAG</strong> evita esto: primero busca en las{" "}
-                  <strong>36.053 resoluciones oficiales de Hacienda</strong> los
-                  casos reales más parecidos al tuyo y obliga a la IA a
-                  responder basándose solo en ellos.
-                </p>
+
+                <div className="rounded-xl border border-emerald-500/30 bg-emerald-950/15 p-4 space-y-2">
+                  <div className="flex items-center gap-2 text-emerald-400 font-semibold text-sm">
+                    <Layers className="w-4 h-4" />
+                    {t.card2Title}
+                  </div>
+                  <p className="text-xs text-slate-300 leading-relaxed">
+                    {t.card2Body}
+                  </p>
+                </div>
+
+                <div className="rounded-xl border border-slate-800 bg-slate-900/70 p-4 space-y-2">
+                  <div className="flex items-center gap-2 text-purple-400 font-semibold text-sm">
+                    <Database className="w-4 h-4" />
+                    {t.card3Title}
+                  </div>
+                  <p className="text-xs text-slate-300 leading-relaxed">
+                    {t.card3Body}
+                  </p>
+                </div>
               </div>
 
-              {/* Tarjeta 2: Qué es Matryoshka */}
-              <div className="rounded-xl border border-emerald-500/30 bg-emerald-950/15 p-4 space-y-2">
-                <div className="flex items-center gap-2 text-emerald-400 font-semibold text-sm">
-                  <Layers className="w-4 h-4" />
-                  2. El Efecto &ldquo;Muñeca Rusa&rdquo; (Matryoshka MRL)
+              {/* Visualizador interactivo de la Muñeca Rusa */}
+              <div className="rounded-xl border border-slate-800 bg-slate-900/90 p-4 flex flex-col md:flex-row items-center justify-between gap-4">
+                <div className="space-y-1 max-w-xl">
+                  <div className="text-xs font-semibold text-white">
+                    {t.visualizerTitle(mrlDimension, vectorRatioPct)}
+                  </div>
+                  <p className="text-xs text-slate-400">{t.visualizerDesc}</p>
                 </div>
-                <p className="text-xs text-slate-300 leading-relaxed">
-                  Para buscar por significado, la IA traduce cada ley a una
-                  lista de <strong>768 números</strong> (vector). Los nuevos
-                  modelos <strong>Matryoshka</strong> concentran la información
-                  más importante al principio de la lista. Así podemos{" "}
-                  <strong>recortar y usar solo los primeros 128 números</strong>{" "}
-                  (un <strong>83% menos de memoria</strong>) llegando casi a la
-                  misma conclusión.
-                </p>
-              </div>
 
-              {/* Tarjeta 3: Arquitectura Híbrida */}
-              <div className="rounded-xl border border-slate-800 bg-slate-900/70 p-4 space-y-2">
-                <div className="flex items-center gap-2 text-purple-400 font-semibold text-sm">
-                  <Database className="w-4 h-4" />
-                  3. Casa + Nube (Hidratación Local)
-                </div>
-                <p className="text-xs text-slate-300 leading-relaxed">
-                  Las 36.053 leyes ocupan <strong>más de 1 GB</strong>. Para no
-                  pagar servidores caros en la nube, guardamos solo los números
-                  ligeros en la nube (Supabase) y leemos los textos completos en{" "}
-                  <strong>1 milisegundo</strong> desde un mini-ordenador{" "}
-                  <strong>NVIDIA Jetson Orin</strong> en casa.
-                </p>
-              </div>
-            </div>
-
-            {/* Visualizador interactivo de la Muñeca Rusa */}
-            <div className="rounded-xl border border-slate-800 bg-slate-900/90 p-4 flex flex-col md:flex-row items-center justify-between gap-4">
-              <div className="space-y-1 max-w-xl">
-                <div className="text-xs font-semibold text-white flex items-center gap-2">
-                  <span>
-                    🪆 Visualizador de Recorte Matryoshka ({mrlDimension} de 768
-                    números activos = {vectorRatioPct}% del tamaño original)
-                  </span>
-                </div>
-                <p className="text-xs text-slate-400">
-                  Cambia entre <strong>128D, 256D y 512D</strong> para ver qué
-                  fracción del vector estamos usando en el panel derecho frente
-                  al vector completo de 768 números del panel izquierdo:
-                </p>
-              </div>
-
-              <div className="flex-1 w-full max-w-xl space-y-1.5">
-                <div className="h-5 w-full rounded-lg bg-slate-800 overflow-hidden p-0.5 border border-slate-700 flex items-center">
-                  <div
-                    style={{ width: `${vectorRatioPct}%` }}
-                    className="h-full rounded-md bg-gradient-to-r from-emerald-500 to-teal-400 transition-all duration-500 flex items-center justify-end pr-2"
-                  >
-                    <span className="text-[10px] font-bold text-slate-950">
-                      {mrlDimension}D ({vectorRatioPct}%)
+                <div className="flex-1 w-full max-w-xl space-y-1.5">
+                  <div className="h-5 w-full rounded-lg bg-slate-800 overflow-hidden p-0.5 border border-slate-700 flex items-center">
+                    <div
+                      style={{ width: `${vectorRatioPct}%` }}
+                      className="h-full rounded-md bg-gradient-to-r from-emerald-500 to-teal-400 transition-all duration-500 flex items-center justify-end pr-2"
+                    >
+                      <span className="text-[10px] font-bold text-slate-950">
+                        {mrlDimension}D ({vectorRatioPct}%)
+                      </span>
+                    </div>
+                    <span className="text-[10px] text-slate-400 ml-auto pr-2">
+                      {t.visualizerDiscarded(ramSavedPct)}
                     </span>
                   </div>
-                  <span className="text-[10px] text-slate-400 ml-auto pr-2">
-                    Resto descartado (-{ramSavedPct}% memoria)
-                  </span>
-                </div>
-                <div className="flex justify-between text-[10px] text-slate-500 font-mono">
-                  <span>Posición 1 (Conceptos clave)</span>
-                  <span>128</span>
-                  <span>256</span>
-                  <span>512</span>
-                  <span>768 (Matices finos)</span>
+                  <div className="flex justify-between text-[10px] text-slate-500 font-mono">
+                    <span>{t.posStart}</span>
+                    <span>128</span>
+                    <span>256</span>
+                    <span>512</span>
+                    <span>{t.posEnd}</span>
+                  </div>
                 </div>
               </div>
-            </div>
-          </div>
-        </section>
-      )}
+            </>
+          )}
+        </div>
+      </section>
 
       {/* ==================== BUSCADOR Y DROPDOWN DE EJEMPLOS ==================== */}
       <section className="border-b border-slate-800/70 bg-slate-900/30 py-5 px-6">
@@ -490,7 +650,7 @@ export default function MatryoshkaBenchmarkPage() {
           <div className="flex flex-col sm:flex-row sm:items-center gap-2.5">
             <label className="text-xs font-medium text-emerald-400 shrink-0 flex items-center gap-1.5">
               <HelpCircle className="w-3.5 h-3.5" />
-              Prueba con un caso fiscal real:
+              {t.sampleLabel}
             </label>
             <select
               value={query}
@@ -498,19 +658,21 @@ export default function MatryoshkaBenchmarkPage() {
                 const selectedQ = e.target.value;
                 if (selectedQ) {
                   setQuery(selectedQ);
-                  runParallelSearch(selectedQ, mrlDimension);
+                  runParallelSearch(selectedQ, mrlDimension, lang);
                 }
               }}
               className="flex-1 bg-slate-900 border border-slate-700/90 hover:border-slate-600 rounded-xl px-3.5 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500 transition cursor-pointer"
             >
-              <option value="">
-                -- Selecciona una pregunta de ejemplo por tipo de impuesto --
-              </option>
+              <option value="">{t.samplePlaceholder}</option>
               {SAMPLE_CATEGORIES.map((group) => (
-                <optgroup key={group.category} label={group.category}>
+                <optgroup
+                  key={group.categoryEs}
+                  label={lang === "en" ? group.categoryEn : group.categoryEs}
+                >
                   {group.items.map((item, i) => (
                     <option key={i} value={item.query}>
-                      {item.label}: &ldquo;{item.query.slice(0, 95)}...&rdquo;
+                      {lang === "en" ? item.labelEn : item.labelEs} — &ldquo;
+                      {item.query.slice(0, 85)}...&rdquo;
                     </option>
                   ))}
                 </optgroup>
@@ -522,7 +684,7 @@ export default function MatryoshkaBenchmarkPage() {
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              runParallelSearch(query, mrlDimension);
+              runParallelSearch(query, mrlDimension, lang);
             }}
             className="flex flex-col sm:flex-row gap-3"
           >
@@ -532,7 +694,7 @@ export default function MatryoshkaBenchmarkPage() {
                 type="text"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="O escribe aquí tu propia duda fiscal (IRPF, IVA, Sociedades, Sucesiones, Alquileres, Cripto...)"
+                placeholder={t.searchPlaceholder}
                 className="w-full pl-12 pr-4 py-3.5 bg-slate-900 border border-slate-700 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition"
               />
             </div>
@@ -542,9 +704,7 @@ export default function MatryoshkaBenchmarkPage() {
               className="px-6 py-3.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-semibold text-sm flex items-center justify-center gap-2 transition shadow-lg shadow-emerald-500/10 shrink-0"
             >
               <Zap className="w-4 h-4 fill-current" />
-              {loadingLeft || loadingRight
-                ? "Consultando en paralelo..."
-                : "Comparar Ambos Modelos"}
+              {loadingLeft || loadingRight ? t.searchingBtn : t.searchBtn}
             </button>
           </form>
 
@@ -555,19 +715,18 @@ export default function MatryoshkaBenchmarkPage() {
             </div>
           )}
 
-          {/* Tarjetas Resumen en Lenguaje Sencillo */}
+          {/* Tarjetas Resumen */}
           {recallStats && tradResult && mrlResult && (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-2">
               <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex items-center justify-between">
                 <div>
                   <p className="text-xs font-medium text-slate-400">
-                    Coincidencia de Documentos
+                    {t.metricMatchTitle}
                   </p>
                   <p className="text-xl font-bold text-emerald-400 mt-0.5">
                     {recallStats.pct}%{" "}
                     <span className="text-xs font-normal text-slate-400">
-                      ({recallStats.matched} de {recallStats.total} leyes
-                      idénticas)
+                      {t.metricMatchSub(recallStats.matched, recallStats.total)}
                     </span>
                   </p>
                 </div>
@@ -577,12 +736,12 @@ export default function MatryoshkaBenchmarkPage() {
               <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex items-center justify-between">
                 <div>
                   <p className="text-xs font-medium text-slate-400">
-                    Memoria Ahorrada en la Nube
+                    {t.metricRamTitle}
                   </p>
                   <p className="text-xl font-bold text-cyan-400 mt-0.5">
                     -{mrlResult.ram_savings_pct}% RAM{" "}
                     <span className="text-xs font-normal text-slate-400">
-                      ({mrlDimension} vs 768 números)
+                      {t.metricRamSub(mrlDimension)}
                     </span>
                   </p>
                 </div>
@@ -592,7 +751,7 @@ export default function MatryoshkaBenchmarkPage() {
               <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex items-center justify-between">
                 <div>
                   <p className="text-xs font-medium text-slate-400">
-                    Tiempo de Búsqueda en Nube
+                    {t.metricCloudTitle}
                   </p>
                   <p className="text-xl font-bold text-amber-300 mt-0.5">
                     {(mrlResult.latency.vector_search_ms / 1000).toFixed(2)} s{" "}
@@ -609,12 +768,12 @@ export default function MatryoshkaBenchmarkPage() {
               <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex items-center justify-between">
                 <div>
                   <p className="text-xs font-medium text-slate-400">
-                    Lectura de Leyes en Disco Local
+                    {t.metricDiskTitle}
                   </p>
                   <p className="text-xl font-bold text-purple-300 mt-0.5">
                     {mrlResult.latency.sqlite_hydration_ms} ms{" "}
                     <span className="text-xs font-normal text-slate-400">
-                      (Instantáneo desde casa)
+                      {t.metricDiskSub}
                     </span>
                   </p>
                 </div>
@@ -634,15 +793,13 @@ export default function MatryoshkaBenchmarkPage() {
               <span className="h-3 w-3 rounded-full bg-blue-400" />
               <div>
                 <h2 className="font-semibold text-sm text-white">
-                  Búsqueda Estándar (Vector Completo: 768 números)
+                  {t.leftPanelTitle}
                 </h2>
-                <p className="text-xs text-slate-400">
-                  Usa el 100% del tamaño del vector · Mayor consumo de memoria
-                </p>
+                <p className="text-xs text-slate-400">{t.leftPanelSub}</p>
               </div>
             </div>
             <span className="text-xs font-medium px-2.5 py-1 rounded-md bg-blue-500/10 text-blue-300 border border-blue-500/30">
-              768D (100% Memoria)
+              {t.leftPanelBadge}
             </span>
           </div>
 
@@ -653,14 +810,12 @@ export default function MatryoshkaBenchmarkPage() {
               <>
                 {tradResult.synthesized_answer && (
                   <div className="p-4 rounded-xl bg-blue-950/30 border border-blue-500/30 space-y-2">
-                    <div className="font-semibold text-xs text-blue-300 flex items-center justify-between">
+                    <div className="font-semibold text-xs text-blue-300 flex flex-wrap items-center justify-between gap-2">
                       <span className="flex items-center gap-1.5">
-                        <Sparkles className="w-4 h-4" /> Conclusión IA con
-                        Vector Completo (768D)
+                        <Sparkles className="w-4 h-4" /> {t.leftAiTitle}
                       </span>
                       <span className="text-[11px] font-normal text-slate-400">
-                        Haz clic en cualquier consulta (ej. V0703-26) para
-                        abrirla
+                        {t.clickCitationHint}
                       </span>
                     </div>
                     <FormattedLLMResponse
@@ -672,8 +827,7 @@ export default function MatryoshkaBenchmarkPage() {
 
                 <div className="space-y-2.5">
                   <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400 px-1">
-                    Consultas Vinculantes Recuperadas ({tradResult.results.length}
-                    )
+                    {t.recoveredDocsHeader(tradResult.results.length)}
                   </h3>
                   {tradResult.results.map((doc, idx) => (
                     <DocumentCard
@@ -681,13 +835,14 @@ export default function MatryoshkaBenchmarkPage() {
                       rank={idx + 1}
                       doc={doc}
                       accent="blue"
+                      t={t}
                       onOpenModal={() => setSelectedDocModal(doc)}
                     />
                   ))}
                 </div>
               </>
             ) : (
-              <EmptyPanelState label="Selecciona un caso fiscal arriba o escribe tu consulta para comparar ambos motores." />
+              <EmptyPanelState label={t.emptyLeft} />
             )}
           </div>
         </section>
@@ -699,14 +854,13 @@ export default function MatryoshkaBenchmarkPage() {
               <span className="h-3 w-3 rounded-full bg-emerald-400 animate-pulse" />
               <div>
                 <h2 className="font-semibold text-sm text-white flex items-center gap-2">
-                  Búsqueda Matryoshka ({mrlDimension} números)
+                  {t.rightPanelTitle(mrlDimension)}
                   <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300">
-                    Ahorra {ramSavedPct}% RAM
+                    {t.rightPanelBadge(ramSavedPct)}
                   </span>
                 </h2>
                 <p className="text-xs text-slate-400">
-                  Usa solo el {vectorRatioPct}% inicial del vector descartando
-                  el resto
+                  {t.rightPanelSub(vectorRatioPct)}
                 </p>
               </div>
             </div>
@@ -740,13 +894,13 @@ export default function MatryoshkaBenchmarkPage() {
               <>
                 {mrlResult.synthesized_answer && (
                   <div className="p-4 rounded-xl bg-emerald-950/25 border border-emerald-500/30 space-y-2">
-                    <div className="font-semibold text-xs text-emerald-300 flex items-center justify-between">
+                    <div className="font-semibold text-xs text-emerald-300 flex flex-wrap items-center justify-between gap-2">
                       <span className="flex items-center gap-1.5">
-                        <Sparkles className="w-4 h-4" /> Conclusión IA con
-                        Vector Reducido ({mrlDimension}D)
+                        <Sparkles className="w-4 h-4" />{" "}
+                        {t.rightAiTitle(mrlDimension)}
                       </span>
                       <span className="text-[11px] font-normal text-slate-400">
-                        Haz clic en cualquier consulta citada para ver la ley
+                        {t.clickCitationHint}
                       </span>
                     </div>
                     <FormattedLLMResponse
@@ -758,8 +912,7 @@ export default function MatryoshkaBenchmarkPage() {
 
                 <div className="space-y-2.5">
                   <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400 px-1">
-                    Consultas Vinculantes Recuperadas ({mrlResult.results.length}
-                    )
+                    {t.recoveredDocsHeader(mrlResult.results.length)}
                   </h3>
                   {mrlResult.results.map((doc, idx) => (
                     <DocumentCard
@@ -767,6 +920,7 @@ export default function MatryoshkaBenchmarkPage() {
                       rank={idx + 1}
                       doc={doc}
                       accent="emerald"
+                      t={t}
                       isMatchWith768={tradIdsSet.has(doc.num_consulta)}
                       onOpenModal={() => setSelectedDocModal(doc)}
                     />
@@ -774,7 +928,7 @@ export default function MatryoshkaBenchmarkPage() {
                 </div>
               </>
             ) : (
-              <EmptyPanelState label="Elige el nivel de recorte (128D, 256D o 512D) y lanza una búsqueda para comparar con el vector completo." />
+              <EmptyPanelState label={t.emptyRight} />
             )}
           </div>
         </section>
@@ -784,23 +938,41 @@ export default function MatryoshkaBenchmarkPage() {
       {selectedDocModal && (
         <OfficialDocumentModal
           doc={selectedDocModal}
+          t={t}
           onClose={() => setSelectedDocModal(null)}
         />
       )}
 
-      {/* ==================== FOOTER CON BRANDING PERSONAL ==================== */}
+      {/* ==================== FOOTER CON BRANDING PERSONAL Y FUENTE OFICIAL ==================== */}
       <footer className="border-t border-slate-800/80 bg-slate-900/60 mt-10 py-6 px-6">
-        <div className="max-w-[1550px] mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-400">
-          <div className="flex items-center gap-2">
+        <div className="max-w-[1550px] mx-auto flex flex-col lg:flex-row items-center justify-between gap-4 text-xs text-slate-400">
+          <div className="flex flex-wrap items-center gap-3">
             <span className="text-base">🪆</span>
             <span>
-              Proyecto educativo open-source desarrollado por{" "}
-              <strong className="text-white">Manuel Mezo</strong> · Datos
-              oficiales de la Dirección General de Tributos (Hacienda Española)
+              {t.footerAuthor}{" "}
+              <a
+                href="https://cv.manuelmezo.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-white font-semibold hover:text-emerald-400 transition"
+              >
+                Manuel Mezo
+              </a>
             </span>
+            <span>•</span>
+            <a
+              href={PETETE_OFFICIAL_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-emerald-400 hover:text-emerald-300 transition font-medium"
+            >
+              <Scale className="w-3.5 h-3.5" />
+              {t.footerSourceLabel}
+              <ExternalLink className="w-3 h-3" />
+            </a>
           </div>
 
-          <div className="flex flex-wrap items-center gap-4">
+          <div className="flex flex-wrap items-center gap-5">
             <a
               href="https://cv.manuelmezo.com"
               target="_blank"
@@ -820,13 +992,13 @@ export default function MatryoshkaBenchmarkPage() {
               GitHub (@manumezog)
             </a>
             <a
-              href="https://www.linkedin.com/search/results/all/?keywords=Manuel%20Mezo"
+              href="https://www.linkedin.com/in/manuelmezo/"
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center gap-1.5 text-slate-300 hover:text-emerald-400 transition font-medium"
             >
               <ExternalLink className="w-3.5 h-3.5" />
-              LinkedIn (Manuel Mezo)
+              LinkedIn
             </a>
             <a
               href="mailto:manumezog@gmail.com"
@@ -856,14 +1028,12 @@ function FormattedLLMResponse({
   const lines = text.split("\n");
 
   const renderInlineFormatting = (lineText: string) => {
-    // Dividir primero por negritas **...**
     const boldParts = lineText.split(/(\*\*.*?\*\*)/g);
 
     return boldParts.map((part, i) => {
       const isBold = part.startsWith("**") && part.endsWith("**");
       const cleanPart = isBold ? part.slice(2, -2) : part;
 
-      // Detectar códigos de Consultas Vinculantes (ej. V0703-26, V1249-26)
       const subParts = cleanPart.split(/\b(V\d{3,5}-\d{2})\b/g);
 
       return (
@@ -875,7 +1045,7 @@ function FormattedLLMResponse({
                   key={j}
                   type="button"
                   onClick={() => onCitationClick(sub)}
-                  title={`Ver texto oficial de la Consulta Vinculante ${sub}`}
+                  title={`Open official Tax Ruling ${sub}`}
                   className="inline-flex items-center gap-1 mx-0.5 px-2 py-0.5 rounded-md bg-emerald-500/20 hover:bg-emerald-500/35 text-emerald-200 border border-emerald-500/40 font-mono text-[11px] font-semibold transition cursor-pointer"
                 >
                   📄 {sub}
@@ -901,7 +1071,6 @@ function FormattedLLMResponse({
         const line = rawLine.trim();
         if (!line) return <div key={idx} className="h-1" />;
 
-        // Listas con viñetas (* o -)
         if (line.startsWith("* ") || line.startsWith("- ")) {
           return (
             <div key={idx} className="flex items-start gap-2 pl-2">
@@ -913,7 +1082,6 @@ function FormattedLLMResponse({
           );
         }
 
-        // Listas numeradas (1. , 2. , etc.)
         const numMatch = line.match(/^(\d+)\.\s+(.*)/);
         if (numMatch) {
           return (
@@ -942,12 +1110,14 @@ function DocumentCard({
   rank,
   doc,
   accent,
+  t,
   isMatchWith768,
   onOpenModal,
 }: {
   rank: number;
   doc: HydratedDocument;
   accent: "blue" | "emerald";
+  t: (typeof UI_TEXT)["es"];
   isMatchWith768?: boolean;
   onOpenModal: () => void;
 }) {
@@ -970,20 +1140,20 @@ function DocumentCard({
             onClick={onOpenModal}
             className={`text-xs font-mono font-semibold px-2.5 py-0.5 rounded-md border transition flex items-center gap-1 ${badgeColor}`}
           >
-            📄 Consulta {doc.num_consulta}
+            📄 {doc.num_consulta}
           </button>
           <span className="text-xs text-slate-400 font-mono">
             {doc.fecha_salida}
           </span>
           {isMatchWith768 && (
             <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
-              <CheckCircle2 className="w-3 h-3" /> Mismo resultado que 768D
+              <CheckCircle2 className="w-3 h-3" /> {t.sameAs768}
             </span>
           )}
         </div>
 
         <span className="text-xs text-slate-400">
-          Afinidad:{" "}
+          {t.affinity}{" "}
           <strong className="text-slate-100 font-mono">
             {(doc.similarity * 100).toFixed(1)}%
           </strong>
@@ -992,7 +1162,8 @@ function DocumentCard({
 
       {doc.organo && (
         <p className="text-[11px] text-slate-400 truncate">
-          <strong className="text-slate-300">Órgano DGT:</strong> {doc.organo}
+          <strong className="text-slate-300">{t.organoLabel}</strong>{" "}
+          {doc.organo}
         </p>
       )}
 
@@ -1003,7 +1174,7 @@ function DocumentCard({
       )}
 
       <div className="text-xs text-slate-200 space-y-1">
-        <p className="font-semibold text-slate-300">Cuestión Planteada:</p>
+        <p className="font-semibold text-slate-300">{t.questionLabel}</p>
         <p className="text-slate-300 leading-relaxed line-clamp-3">
           {doc.cuestion_planteada || doc.descripcion_hechos}
         </p>
@@ -1017,11 +1188,11 @@ function DocumentCard({
         >
           {expanded ? (
             <>
-              <ChevronUp className="w-3.5 h-3.5" /> Ocultar texto rápido
+              <ChevronUp className="w-3.5 h-3.5" /> {t.hideQuickText}
             </>
           ) : (
             <>
-              <ChevronDown className="w-3.5 h-3.5" /> Desplegar resolución aquí
+              <ChevronDown className="w-3.5 h-3.5" /> {t.showQuickText}
             </>
           )}
         </button>
@@ -1031,7 +1202,7 @@ function DocumentCard({
           onClick={onOpenModal}
           className="text-xs text-slate-300 hover:text-white flex items-center gap-1 bg-slate-900 hover:bg-slate-800 border border-slate-800 px-2.5 py-1 rounded-lg transition"
         >
-          <ExternalLink className="w-3 h-3" /> Abrir visor completo y web DGT
+          <ExternalLink className="w-3 h-3" /> {t.openFullModal}
         </button>
       </div>
 
@@ -1040,7 +1211,7 @@ function DocumentCard({
           {doc.descripcion_hechos && (
             <div>
               <h4 className="font-semibold text-slate-200 mb-1">
-                Descripción de Hechos:
+                {t.factsTitle}:
               </h4>
               <p className="whitespace-pre-line leading-relaxed text-slate-400">
                 {doc.descripcion_hechos}
@@ -1049,7 +1220,7 @@ function DocumentCard({
           )}
           <div>
             <h4 className="font-semibold text-slate-200 mb-1">
-              Contestación Vinculante Íntegra:
+              {t.rulingTitle}:
             </h4>
             <p className="whitespace-pre-line leading-relaxed">
               {doc.contestacion_completa}
@@ -1067,9 +1238,11 @@ function DocumentCard({
 
 function OfficialDocumentModal({
   doc,
+  t,
   onClose,
 }: {
   doc: HydratedDocument;
+  t: (typeof UI_TEXT)["es"];
   onClose: () => void;
 }) {
   const [copied, setCopied] = useState(false);
@@ -1086,14 +1259,13 @@ function OfficialDocumentModal({
   return (
     <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
       <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-4xl w-full max-h-[88vh] flex flex-col overflow-hidden shadow-2xl">
-        {/* Cabecera del Modal */}
         <div className="p-4 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3 bg-slate-950">
           <div className="flex items-center gap-2.5">
             <span className="px-3 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-mono text-sm font-bold">
               Consulta Vinculante {doc.num_consulta}
             </span>
             <span className="text-xs text-slate-400 font-mono">
-              Fecha Salida: {doc.fecha_salida}
+              {t.modalDate} {doc.fecha_salida}
             </span>
           </div>
 
@@ -1105,12 +1277,12 @@ function OfficialDocumentModal({
             >
               {copied ? (
                 <>
-                  <Check className="w-3.5 h-3.5 text-emerald-400" /> Código{" "}
-                  {doc.num_consulta} copiado
+                  <Check className="w-3.5 h-3.5 text-emerald-400" />{" "}
+                  {t.copiedCode(doc.num_consulta)}
                 </>
               ) : (
                 <>
-                  <Copy className="w-3.5 h-3.5" /> Copiar código
+                  <Copy className="w-3.5 h-3.5" /> {t.copyCode}
                 </>
               )}
             </button>
@@ -1118,11 +1290,10 @@ function OfficialDocumentModal({
             <button
               type="button"
               onClick={() => copyCodeAndOpenPetete(true)}
-              title="Copia automáticamente el número de consulta y abre el buscador oficial PETETE de Hacienda"
               className="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold text-xs flex items-center gap-1.5 transition"
             >
               <ExternalLink className="w-3.5 h-3.5" />
-              Verificar en Web Oficial Hacienda (PETETE)
+              {t.verifyOfficialWeb}
             </button>
 
             <button
@@ -1135,18 +1306,17 @@ function OfficialDocumentModal({
           </div>
         </div>
 
-        {/* Cuerpo del Documento Oficial */}
         <div className="p-6 overflow-y-auto space-y-5 text-xs leading-relaxed text-slate-200">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 bg-slate-950/70 p-3.5 rounded-xl border border-slate-800">
             <div>
               <span className="text-slate-400 block text-[11px]">
-                Órgano Directivo Emisor:
+                {t.modalOrgano}
               </span>
               <strong className="text-white">{doc.organo}</strong>
             </div>
             <div>
               <span className="text-slate-400 block text-[11px]">
-                Normativa Aplicable:
+                {t.modalNormativa}
               </span>
               <span className="text-amber-200 font-mono">{doc.normativa}</span>
             </div>
@@ -1155,7 +1325,7 @@ function OfficialDocumentModal({
           {doc.cuestion_planteada && (
             <div className="space-y-1">
               <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-400">
-                Cuestión Planteada
+                {t.questionLabel}
               </h4>
               <div className="p-3.5 rounded-xl bg-slate-950/50 border border-slate-800 whitespace-pre-line">
                 {doc.cuestion_planteada}
@@ -1166,7 +1336,7 @@ function OfficialDocumentModal({
           {doc.descripcion_hechos && (
             <div className="space-y-1">
               <h4 className="text-xs font-bold uppercase tracking-wider text-blue-400">
-                Descripción de los Hechos
+                {t.factsTitle}
               </h4>
               <div className="p-3.5 rounded-xl bg-slate-950/50 border border-slate-800 whitespace-pre-line text-slate-300">
                 {doc.descripcion_hechos}
@@ -1176,7 +1346,7 @@ function OfficialDocumentModal({
 
           <div className="space-y-1">
             <h4 className="text-xs font-bold uppercase tracking-wider text-purple-400">
-              Contestación Completa de la Dirección General de Tributos
+              {t.rulingTitle}
             </h4>
             <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 whitespace-pre-line text-slate-200 leading-relaxed">
               {doc.contestacion_completa}

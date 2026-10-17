@@ -70,8 +70,12 @@ class SearchRequest(BaseModel):
     )
     top_k: int = Field(default=5, ge=1, le=20, description="Número de documentos a recuperar")
     generate_answer: bool = Field(
-        default=False,
+        default=True,
         description="Si es True, genera síntesis jurídica con LLM usando el contexto hidratado",
+    )
+    lang: Literal["es", "en"] = Field(
+        default="es",
+        description="Idioma de la síntesis generada por el LLM ('es' o 'en')",
     )
 
 
@@ -214,11 +218,13 @@ def hydrate_from_sqlite(matches: List[dict]) -> List[HydratedDocument]:
     return hydrated_results
 
 
-async def generate_llm_response(query: str, docs: List[HydratedDocument]) -> Optional[str]:
+async def generate_llm_response(
+    query: str, docs: List[HydratedDocument], lang: str = "es"
+) -> Optional[str]:
     """
     Genera una respuesta legal citando las consultas vinculantes hidratadas,
     usando OpenRouter o la API directa de Gemini si están configuradas.
-    Recarga .env en caliente para no depender de reinicios del servidor.
+    Soporta síntesis en Español ('es') o Inglés ('en') para visitantes internacionales.
     """
     if not docs:
         return None
@@ -249,12 +255,20 @@ async def generate_llm_response(query: str, docs: List[HydratedDocument]) -> Opt
         )
     context_text = "\n\n".join(context_blocks)
 
-    system_prompt = (
-        "Eres un asesor fiscal experto en derecho tributario español. "
-        "Responde de forma clara, directa y estructurada (máximo 200 palabras) a la consulta del usuario "
-        "basándote EXCLUSIVAMENTE en las Consultas Vinculantes de la Dirección General de Tributos (DGT) "
-        "proporcionadas en el contexto. Cita siempre el número de consulta vinculante (ej. V1234-23) y la normativa aplicable."
-    )
+    if lang == "en":
+        system_prompt = (
+            "You are an expert Spanish Tax Law advisor. "
+            "Respond clearly, directly, and in a structured way IN ENGLISH (max 200 words) to the user's query, "
+            "based EXCLUSIVELY on the official Spanish Tax Rulings (Consultas Vinculantes de la DGT) provided in the context. "
+            "Always cite the exact official ruling IDs (e.g., V0703-26) and the applicable Spanish tax articles."
+        )
+    else:
+        system_prompt = (
+            "Eres un asesor fiscal experto en derecho tributario español. "
+            "Responde de forma clara, directa y estructurada EN ESPAÑOL (máximo 200 palabras) a la consulta del usuario "
+            "basándote EXCLUSIVAMENTE en las Consultas Vinculantes de la Dirección General de Tributos (DGT) "
+            "proporcionadas en el contexto. Cita siempre el número de consulta vinculante (ej. V1234-23) y la normativa aplicable."
+        )
 
     errors = []
 
@@ -442,7 +456,7 @@ async def search_consultas(req: SearchRequest):
     t3 = time.perf_counter()
     synthesized_answer = None
     if req.generate_answer and hydrated_docs:
-        synthesized_answer = await generate_llm_response(req.query, hydrated_docs)
+        synthesized_answer = await generate_llm_response(req.query, hydrated_docs, req.lang)
     llm_generation_ms = (time.perf_counter() - t3) * 1000
 
     total_ms = (time.perf_counter() - t_start) * 1000

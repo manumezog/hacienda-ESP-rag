@@ -122,5 +122,6 @@ Proyecto desarrollado con fines educativos y de divulgación tecnológica por **
 
 * 🌐 **Web Personal / CV:** [cv.manuelmezo.com](https://cv.manuelmezo.com)
 * 💻 **GitHub:** [@manumezog](https://github.com/manumezog)
-* 💼 **LinkedIn:** [Manuel Mezo](https://www.linkedin.com/search/results/all/?keywords=Manuel%20Mezo)
+* 💼 **LinkedIn:** [linkedin.com/in/manuelmezo](https://www.linkedin.com/in/manuelmezo/)
 * ✉️ **Email:** [manumezog@gmail.com](mailto:manumezog@gmail.com)
+* 🏛️ **Fuente de Datos Oficial:** [Dirección General de Tributos — Ministerio de Hacienda (PETETE)](https://petete.tributos.hacienda.gob.es/consultas)
