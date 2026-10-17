@@ -259,9 +259,10 @@ async def generate_llm_response(query: str, docs: List[HydratedDocument]) -> Opt
     errors = []
 
     if gemini_key:
-        gemini_models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+        gemini_models = ["gemini-3.8-flash", "gemini-flash-latest"]
         async with httpx.AsyncClient(timeout=45.0) as client:
-            for g_model in gemini_models:
+            # Si los modelos por defecto fallasen, descubrir automáticamente desde ListModels
+            for idx, g_model in enumerate(gemini_models):
                 try:
                     resp = await client.post(
                         f"https://generativelanguage.googleapis.com/v1beta/models/{g_model}:generateContent?key={gemini_key}",
@@ -282,6 +283,18 @@ async def generate_llm_response(query: str, docs: List[HydratedDocument]) -> Opt
                             return candidates[0]["content"]["parts"][0]["text"]
                     else:
                         errors.append(f"Gemini ({g_model}) HTTP {resp.status_code}: {resp.text[:180]}")
+                        # Autodescubrir modelos activos en la cuenta si falla el primero
+                        if idx == len(gemini_models) - 1:
+                            list_resp = await client.get(
+                                f"https://generativelanguage.googleapis.com/v1beta/models?key={gemini_key}"
+                            )
+                            if list_resp.status_code == 200:
+                                for m in list_resp.json().get("models", []):
+                                    name = m.get("name", "").replace("models/", "")
+                                    methods = m.get("supportedGenerationMethods", [])
+                                    if "generateContent" in methods and "flash" in name and name not in gemini_models:
+                                        gemini_models.append(name)
+                                        break
                 except Exception as exc:
                     errors.append(f"Error red Gemini ({g_model}): {exc}")
 
