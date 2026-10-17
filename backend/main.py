@@ -124,8 +124,8 @@ class SearchRequest(BaseModel):
     query: str = Field(
         ...,
         min_length=3,
-        max_length=500,
-        description="Consulta fiscal o tributaria en lenguaje natural (máx. 500 caracteres)",
+        max_length=1500,
+        description="Consulta fiscal o tributaria en lenguaje natural (máx. 1500 caracteres)",
     )
     dimensions: Literal[128, 256, 512, 768] = Field(
         default=128,
