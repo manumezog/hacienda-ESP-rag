@@ -1,0 +1,50 @@
+# Databases & Local Dumps (Cold Storage - DO NOT COMMIT 1GB+ FILES)
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+*.jsonl
+progress.txt
+consultas_vinculantes.db
+consultas_jetson.db
+
+# Environment variables & secrets
+.env
+.env.local
+.env.*.local
+backend/.env
+frontend/.env*
+
+# Python / Backend
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+backend/venv/
+backend/.venv/
+mi_entorno/
+*.egg-info/
+dist/
+build/
+
+# Node / Frontend
+node_modules/
+frontend/node_modules/
+.next/
+frontend/.next/
+out/
+frontend/out/
+*.tsbuildinfo
+next-env.d.ts
+
+# Temporary / Debug scraper dumps
+*.html
+ids.txt
+*.log
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
