@@ -35,10 +35,14 @@ DEFAULT_ORIGINS = [
 ENV_ORIGINS = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "").split(",") if o.strip()]
 ALLOWED_ORIGINS = ENV_ORIGINS if ENV_ORIGINS else DEFAULT_ORIGINS
 
-# Rate Limiting en memoria por IP (Protección de GPU Jetson y cuota Gemini API)
-RATE_LIMIT_MAX_REQUESTS = int(os.getenv("RATE_LIMIT_PER_MIN", "24"))
-RATE_LIMIT_WINDOW_SECONDS = 60.0
-_ip_request_log: Dict[str, Deque[float]] = defaultdict(deque)
+# Rate Limiting en memoria por IP (10 por minuto y 200 por día)
+RATE_LIMIT_MAX_PER_MIN = int(os.getenv("RATE_LIMIT_PER_MIN", "10"))
+RATE_LIMIT_MAX_PER_DAY = int(os.getenv("RATE_LIMIT_PER_DAY", "200"))
+WINDOW_MINUTE = 60.0
+WINDOW_DAY = 86400.0
+
+_ip_minute_log: Dict[str, Deque[float]] = defaultdict(deque)
+_ip_day_log: Dict[str, Deque[float]] = defaultdict(deque)
 
 app = FastAPI(
     title="Hacienda-ESP-RAG API (Matryoshka Edge + Cloud)",
@@ -75,8 +79,9 @@ def get_supabase() -> Client:
 
 def enforce_rate_limit(request: Request) -> None:
     """
-    Limita el número de peticiones por minuto por IP real (usando CF-Connecting-IP de Cloudflare Tunnel).
-    Protege la GPU de la Jetson y la cuota de Gemini frente a abusos o bots.
+    Aplica doble límite por IP real (vía CF-Connecting-IP de Cloudflare Tunnel):
+    - Máximo 10 peticiones por minuto (5 comparativas Side-by-Side/min)
+    - Máximo 200 peticiones por día (24h)
     """
     client_ip = (
         request.headers.get("CF-Connecting-IP")
@@ -84,16 +89,31 @@ def enforce_rate_limit(request: Request) -> None:
         or (request.client.host if request.client else "unknown")
     )
     now = time.monotonic()
-    q = _ip_request_log[client_ip]
-    while q and (now - q[0]) > RATE_LIMIT_WINDOW_SECONDS:
-        q.popleft()
 
-    if len(q) >= RATE_LIMIT_MAX_REQUESTS:
+    # 1. Comprobar ventana de 24 horas (200/día)
+    q_day = _ip_day_log[client_ip]
+    while q_day and (now - q_day[0]) > WINDOW_DAY:
+        q_day.popleft()
+
+    if len(q_day) >= RATE_LIMIT_MAX_PER_DAY:
         raise HTTPException(
             status_code=429,
-            detail="Has superado el límite de consultas por minuto. Por favor, espera unos segundos antes de volver a buscar.",
+            detail="Has alcanzado el límite máximo de 200 consultas diarias. Vuelve a intentarlo mañana.",
         )
-    q.append(now)
+
+    # 2. Comprobar ventana de 1 minuto (10/minuto)
+    q_min = _ip_minute_log[client_ip]
+    while q_min and (now - q_min[0]) > WINDOW_MINUTE:
+        q_min.popleft()
+
+    if len(q_min) >= RATE_LIMIT_MAX_PER_MIN:
+        raise HTTPException(
+            status_code=429,
+            detail="Has superado el límite de 10 peticiones por minuto. Espera unos segundos antes de volver a consultar.",
+        )
+
+    q_min.append(now)
+    q_day.append(now)
 
 
 # =============================================================================
