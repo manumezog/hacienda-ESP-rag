@@ -218,9 +218,15 @@ async def generate_llm_response(query: str, docs: List[HydratedDocument]) -> Opt
     """
     Genera una respuesta legal citando las consultas vinculantes hidratadas,
     usando OpenRouter o la API directa de Gemini si están configuradas.
+    Recarga .env en caliente para no depender de reinicios del servidor.
     """
     if not docs:
         return None
+
+    load_dotenv(override=True)
+    openrouter_key = os.getenv("OPENROUTER_API_KEY", "").strip()
+    gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
+    llm_model = os.getenv("LLM_MODEL", "google/gemini-2.0-flash-001").strip()
 
     context_blocks = []
     for d in docs[:3]:
@@ -234,50 +240,67 @@ async def generate_llm_response(query: str, docs: List[HydratedDocument]) -> Opt
 
     system_prompt = (
         "Eres un asesor fiscal experto en derecho tributario español. "
-        "Responde a la consulta del usuario basándote EXCLUSIVAMENTE en las Consultas Vinculantes "
-        "de la Dirección General de Tributos (DGT) proporcionadas en el contexto. "
-        "Cita siempre el número de consulta vinculante (ej. V1234-23) y la normativa aplicable."
+        "Responde de forma clara, directa y estructurada (máximo 200 palabras) a la consulta del usuario "
+        "basándote EXCLUSIVAMENTE en las Consultas Vinculantes de la Dirección General de Tributos (DGT) "
+        "proporcionadas en el contexto. Cita siempre el número de consulta vinculante (ej. V1234-23) y la normativa aplicable."
     )
 
-    if OPENROUTER_API_KEY:
-        async with httpx.AsyncClient(timeout=45.0) as client:
-            resp = await client.post(
-                "https://openrouter.ai/api/v1/chat/completions",
-                headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}"},
-                json={
-                    "model": LLM_MODEL,
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": f"Pregunta: {query}\n\nContexto DGT:\n{context_text}"},
-                    ],
-                    "temperature": 0.1,
-                },
-            )
-            if resp.status_code == 200:
-                return resp.json()["choices"][0]["message"]["content"]
+    last_error = None
 
-    if GEMINI_API_KEY:
-        gemini_models = ["gemini-2.5-flash", "gemini-2.0-flash"]
+    if gemini_key:
+        gemini_models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-flash-lite"]
         async with httpx.AsyncClient(timeout=45.0) as client:
             for g_model in gemini_models:
+                try:
+                    resp = await client.post(
+                        f"https://generativelanguage.googleapis.com/v1beta/models/{g_model}:generateContent?key={gemini_key}",
+                        json={
+                            "contents": [
+                                {
+                                    "parts": [
+                                        {"text": f"{system_prompt}\n\nPregunta: {query}\n\nContexto DGT:\n{context_text}"}
+                                    ]
+                                }
+                            ],
+                            "generationConfig": {"temperature": 0.1},
+                        },
+                    )
+                    if resp.status_code == 200:
+                        candidates = resp.json().get("candidates", [])
+                        if candidates:
+                            return candidates[0]["content"]["parts"][0]["text"]
+                    else:
+                        last_error = f"Gemini ({g_model}) HTTP {resp.status_code}: {resp.text[:200]}"
+                except Exception as exc:
+                    last_error = f"Error de red Gemini ({g_model}): {exc}"
+
+    if openrouter_key:
+        async with httpx.AsyncClient(timeout=45.0) as client:
+            try:
                 resp = await client.post(
-                    f"https://generativelanguage.googleapis.com/v1beta/models/{g_model}:generateContent?key={GEMINI_API_KEY}",
+                    "https://openrouter.ai/api/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {openrouter_key}"},
                     json={
-                        "contents": [
-                            {
-                                "parts": [
-                                    {"text": f"{system_prompt}\n\nPregunta: {query}\n\nContexto DGT:\n{context_text}"}
-                                ]
-                            }
+                        "model": llm_model,
+                        "messages": [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": f"Pregunta: {query}\n\nContexto DGT:\n{context_text}"},
                         ],
-                        "generationConfig": {"temperature": 0.1},
+                        "temperature": 0.1,
                     },
                 )
                 if resp.status_code == 200:
-                    candidates = resp.json().get("candidates", [])
-                    if candidates:
-                        return candidates[0]["content"]["parts"][0]["text"]
+                    return resp.json()["choices"][0]["message"]["content"]
+                else:
+                    last_error = f"OpenRouter HTTP {resp.status_code}: {resp.text[:200]}"
+            except Exception as exc:
+                last_error = f"Error de red OpenRouter: {exc}"
 
+    if not gemini_key and not openrouter_key:
+        return "⚠️ No se detectó GEMINI_API_KEY ni OPENROUTER_API_KEY en el archivo backend/.env de la Jetson."
+
+    if last_error:
+        return f"⚠️ No se pudo generar la síntesis LLM ({last_error})"
 
     return None
 
