@@ -52,7 +52,7 @@ In conventional embedding models, semantic information is distributed uniformly 
 
 Models trained with **Matryoshka Representation Learning (MRL)**—such as Google's **EmbeddingGemma**—organize semantic information hierarchically like nested **Russian dolls**:
 * Multi-scale nested loss functions force the neural network to pack **coarse, high-variance legal concepts into the earliest dimensions** (`1..128`) and progressive syntactic nuances into later dimensions (`129..768`).
-* At query time, we apply **dynamic prefix slicing (`vector[:d]`) + L2 hypersphere re-normalization ($\|\mathbf{v}\|_2 = 1$)** without re-indexing the database:
+* At query time, we apply **dynamic prefix slicing (`vector[:d]`) + L2 hypersphere re-normalization (`‖v‖₂ = 1`)** without re-indexing the database:
 
 | Mode | Active Dimensions | Size per Vector (`halfvec` / `float16`) | Vector RAM Saved | Typical Retrieval Quality |
 | :--- | :---: | :---: | :---: | :---: |
@@ -135,7 +135,7 @@ En un modelo de embeddings convencional, la semántica se reparte de forma unifo
 
 Los modelos entrenados con **Matryoshka Representation Learning (MRL)** —como **EmbeddingGemma** de Google— organizan la información como una **muñeca rusa**:
 * Durante el entrenamiento, la función de pérdida obliga a concentrar **los conceptos nucleares en las primeras coordenadas del vector** (las primeras 128 dimensiones) y delegar los matices finos hacia el final (`129..768`).
-* Esto permite aplicar **truncado dinámico en caliente (`vector[:d]`) + re-normalización L2 ($\|\mathbf{v}\|_2 = 1$)** en tiempo de consulta:
+* Esto permite aplicar **truncado dinámico en caliente (`vector[:d]`) + re-normalización L2 (`‖v‖₂ = 1`)** en tiempo de consulta:
 
 | Modo | Dimensiones Activas | Peso por Vector (`halfvec` / `float16`) | Ahorro de RAM Vectorial | Retención Típica de Calidad |
 | :--- | :---: | :---: | :---: | :---: |
