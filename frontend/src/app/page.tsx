@@ -376,6 +376,7 @@ export default function MatryoshkaBenchmarkPage() {
   const [generateAnswer, setGenerateAnswer] = useState<boolean>(true);
 
   const [showEduGuide, setShowEduGuide] = useState<boolean>(true);
+  const [mobileTab, setMobileTab] = useState<"mrl" | "trad" | "both">("mrl");
   const [selectedDocModal, setSelectedDocModal] =
     useState<HydratedDocument | null>(null);
 
@@ -493,23 +494,23 @@ export default function MatryoshkaBenchmarkPage() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
-      {/* ==================== CABECERA PRINCIPAL ==================== */}
-      <header className="border-b border-slate-800/80 bg-slate-900/70 backdrop-blur sticky top-0 z-30">
-        <div className="max-w-[1550px] mx-auto px-6 py-3.5 flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-bold text-lg">
+      {/* ==================== CABECERA PRINCIPAL (OPTIMIZADA PARA MÓVIL) ==================== */}
+      <header className="border-b border-slate-800/80 bg-slate-900/80 backdrop-blur sticky top-0 z-30">
+        <div className="max-w-[1550px] mx-auto px-3.5 sm:px-6 py-2.5 sm:py-3.5 flex flex-wrap items-center justify-between gap-2.5 sm:gap-4">
+          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+            <div className="h-8 w-8 sm:h-10 sm:w-10 shrink-0 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-bold text-base sm:text-lg">
               🪆
             </div>
-            <div>
-              <div className="flex items-center gap-2.5">
-                <h1 className="font-bold text-lg tracking-tight text-white">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h1 className="font-bold text-sm sm:text-lg tracking-tight text-white truncate">
                   hacienda-ESP-rag
                 </h1>
-                <span className="text-[11px] font-medium px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                <span className="hidden md:inline-block text-[11px] font-medium px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
                   {t.badge}
                 </span>
               </div>
-              <p className="text-xs text-slate-400">
+              <p className="hidden sm:block text-xs text-slate-400 truncate">
                 {t.subtitlePrefix}{" "}
                 <strong className="text-slate-200">{t.subtitleStrong}</strong>{" "}
                 {t.subtitleSuffix}
@@ -517,13 +518,13 @@ export default function MatryoshkaBenchmarkPage() {
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2.5 text-xs">
+          <div className="flex items-center gap-1.5 sm:gap-2.5 text-xs ml-auto">
             {/* Selector de Idioma ES / EN */}
-            <div className="flex items-center bg-slate-950 p-1 rounded-lg border border-slate-800">
+            <div className="flex items-center bg-slate-950 p-0.5 sm:p-1 rounded-lg border border-slate-800">
               <button
                 type="button"
                 onClick={() => handleLanguageChange("es")}
-                className={`px-2.5 py-1 rounded-md font-semibold transition flex items-center gap-1 ${
+                className={`px-2 sm:px-2.5 py-1 rounded-md font-semibold transition flex items-center gap-1 ${
                   lang === "es"
                     ? "bg-emerald-500 text-slate-950 shadow"
                     : "text-slate-400 hover:text-slate-200"
@@ -534,7 +535,7 @@ export default function MatryoshkaBenchmarkPage() {
               <button
                 type="button"
                 onClick={() => handleLanguageChange("en")}
-                className={`px-2.5 py-1 rounded-md font-semibold transition flex items-center gap-1 ${
+                className={`px-2 sm:px-2.5 py-1 rounded-md font-semibold transition flex items-center gap-1 ${
                   lang === "en"
                     ? "bg-emerald-500 text-slate-950 shadow"
                     : "text-slate-400 hover:text-slate-200"
@@ -547,41 +548,47 @@ export default function MatryoshkaBenchmarkPage() {
             <button
               type="button"
               onClick={() => setShowEduGuide(!showEduGuide)}
-              className={`px-3 py-1.5 rounded-lg border flex items-center gap-1.5 transition ${
+              className={`px-2.5 sm:px-3 py-1.5 rounded-lg border flex items-center gap-1.5 transition ${
                 showEduGuide
                   ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-300"
                   : "bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800"
               }`}
             >
-              <BookOpen className="w-3.5 h-3.5" />
-              {showEduGuide ? t.hideGuide : t.showGuide}
+              <BookOpen className="w-3.5 h-3.5 shrink-0" />
+              <span className="hidden sm:inline">
+                {showEduGuide ? t.hideGuide : t.showGuide}
+              </span>
+              <span className="sm:hidden">
+                {lang === "en" ? "Guide" : "Guía"}
+              </span>
             </button>
 
-            <label className="flex items-center gap-2 bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 cursor-pointer hover:border-slate-700">
+            <label className="flex items-center gap-1.5 sm:gap-2 bg-slate-900 border border-slate-800 rounded-lg px-2.5 sm:px-3 py-1.5 cursor-pointer hover:border-slate-700">
               <input
                 type="checkbox"
                 checked={generateAnswer}
                 onChange={(e) => setGenerateAnswer(e.target.checked)}
                 className="rounded accent-emerald-500"
               />
-              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-              <span className="text-slate-200 font-medium">
+              <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+              <span className="hidden sm:inline text-slate-200 font-medium">
                 {t.aiSynthesisToggle}
               </span>
+              <span className="sm:hidden text-slate-200 font-medium">IA</span>
             </label>
           </div>
         </div>
       </header>
 
       {/* ==================== HERO PRINCIPAL Y GUÍA EDUCATIVA ==================== */}
-      <section className="border-b border-slate-800/80 bg-gradient-to-b from-emerald-950/25 via-slate-900/50 to-slate-950 px-6 pt-7 pb-6">
-        <div className="max-w-[1550px] mx-auto space-y-5">
+      <section className="border-b border-slate-800/80 bg-gradient-to-b from-emerald-950/25 via-slate-900/50 to-slate-950 px-4 sm:px-6 pt-5 sm:pt-7 pb-5 sm:pb-6">
+        <div className="max-w-[1550px] mx-auto space-y-4 sm:space-y-5">
           {/* Título Principal Prominente (Siempre visible) */}
           <div className="space-y-2">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-semibold">
+            <div className="inline-flex items-center gap-2 px-2.5 sm:px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-[11px] sm:text-xs font-semibold">
               <span>🪆 {t.eduTag}</span>
             </div>
-            <h2 className="text-2xl sm:text-3xl lg:text-4xl font-extrabold tracking-tight text-white leading-tight">
+            <h2 className="text-xl sm:text-3xl lg:text-4xl font-extrabold tracking-tight text-white leading-snug sm:leading-tight">
               {lang === "es" ? (
                 <>
                   Buscador inteligente sobre{" "}
@@ -600,17 +607,17 @@ export default function MatryoshkaBenchmarkPage() {
                 </>
               )}
             </h2>
-            <p className="text-sm sm:text-base text-slate-300 max-w-4xl">
+            <p className="text-xs sm:text-base text-slate-300 max-w-4xl">
               {t.eduTitle}
             </p>
           </div>
 
           {showEduGuide && (
             <>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-1">
-                <div className="rounded-xl border border-slate-800 bg-slate-900/70 p-4 space-y-2">
-                  <div className="flex items-center gap-2 text-blue-400 font-semibold text-sm">
-                    <Scale className="w-4 h-4" />
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4 pt-1">
+                <div className="rounded-xl border border-slate-800 bg-slate-900/70 p-3.5 sm:p-4 space-y-1.5 sm:space-y-2">
+                  <div className="flex items-center gap-2 text-blue-400 font-semibold text-xs sm:text-sm">
+                    <Scale className="w-4 h-4 shrink-0" />
                     {t.card1Title}
                   </div>
                   <p className="text-xs text-slate-300 leading-relaxed">
@@ -618,9 +625,9 @@ export default function MatryoshkaBenchmarkPage() {
                   </p>
                 </div>
 
-                <div className="rounded-xl border border-emerald-500/30 bg-emerald-950/15 p-4 space-y-2">
-                  <div className="flex items-center gap-2 text-emerald-400 font-semibold text-sm">
-                    <Layers className="w-4 h-4" />
+                <div className="rounded-xl border border-emerald-500/30 bg-emerald-950/15 p-3.5 sm:p-4 space-y-1.5 sm:space-y-2">
+                  <div className="flex items-center gap-2 text-emerald-400 font-semibold text-xs sm:text-sm">
+                    <Layers className="w-4 h-4 shrink-0" />
                     {t.card2Title}
                   </div>
                   <p className="text-xs text-slate-300 leading-relaxed">
@@ -628,9 +635,9 @@ export default function MatryoshkaBenchmarkPage() {
                   </p>
                 </div>
 
-                <div className="rounded-xl border border-slate-800 bg-slate-900/70 p-4 space-y-2">
-                  <div className="flex items-center gap-2 text-purple-400 font-semibold text-sm">
-                    <Database className="w-4 h-4" />
+                <div className="rounded-xl border border-slate-800 bg-slate-900/70 p-3.5 sm:p-4 space-y-1.5 sm:space-y-2">
+                  <div className="flex items-center gap-2 text-purple-400 font-semibold text-xs sm:text-sm">
+                    <Database className="w-4 h-4 shrink-0" />
                     {t.card3Title}
                   </div>
                   <p className="text-xs text-slate-300 leading-relaxed">
@@ -640,34 +647,40 @@ export default function MatryoshkaBenchmarkPage() {
               </div>
 
               {/* Visualizador interactivo de la Muñeca Rusa */}
-              <div className="rounded-xl border border-slate-800 bg-slate-900/90 p-4 flex flex-col md:flex-row items-center justify-between gap-4">
+              <div className="rounded-xl border border-slate-800 bg-slate-900/90 p-3.5 sm:p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 sm:gap-4">
                 <div className="space-y-1 max-w-xl">
                   <div className="text-xs font-semibold text-white">
                     {t.visualizerTitle(mrlDimension, vectorRatioPct)}
                   </div>
-                  <p className="text-xs text-slate-400">{t.visualizerDesc}</p>
+                  <p className="text-[11px] sm:text-xs text-slate-400">
+                    {t.visualizerDesc}
+                  </p>
                 </div>
 
                 <div className="flex-1 w-full max-w-xl space-y-1.5">
-                  <div className="h-5 w-full rounded-lg bg-slate-800 overflow-hidden p-0.5 border border-slate-700 flex items-center">
+                  <div className="h-6 sm:h-5 w-full rounded-lg bg-slate-800 overflow-hidden p-0.5 border border-slate-700 flex items-center">
                     <div
                       style={{ width: `${vectorRatioPct}%` }}
-                      className="h-full rounded-md bg-gradient-to-r from-emerald-500 to-teal-400 transition-all duration-500 flex items-center justify-end pr-2"
+                      className="min-w-[68px] h-full rounded-md bg-gradient-to-r from-emerald-500 to-teal-400 transition-all duration-500 flex items-center justify-end pr-2 shrink-0"
                     >
-                      <span className="text-[10px] font-bold text-slate-950">
+                      <span className="text-[10px] font-bold text-slate-950 whitespace-nowrap">
                         {mrlDimension}D ({vectorRatioPct}%)
                       </span>
                     </div>
-                    <span className="text-[10px] text-slate-400 ml-auto pr-2">
+                    <span className="text-[10px] text-slate-400 ml-auto pr-2 truncate pl-2">
                       {t.visualizerDiscarded(ramSavedPct)}
                     </span>
                   </div>
                   <div className="flex justify-between text-[10px] text-slate-500 font-mono">
-                    <span>{t.posStart}</span>
+                    <span className="truncate max-w-[110px] sm:max-w-none">
+                      {t.posStart}
+                    </span>
                     <span>128</span>
                     <span>256</span>
                     <span>512</span>
-                    <span>{t.posEnd}</span>
+                    <span className="truncate max-w-[110px] sm:max-w-none text-right">
+                      {t.posEnd}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -677,12 +690,12 @@ export default function MatryoshkaBenchmarkPage() {
       </section>
 
       {/* ==================== BUSCADOR Y DROPDOWN DE EJEMPLOS ==================== */}
-      <section className="border-b border-slate-800/70 bg-slate-900/30 py-5 px-6">
+      <section className="border-b border-slate-800/70 bg-slate-900/30 py-4 sm:py-5 px-4 sm:px-6">
         <div className="max-w-[1550px] mx-auto space-y-3">
           {/* Selector Dropdown de Casos Reales */}
-          <div className="flex flex-col sm:flex-row sm:items-center gap-2.5">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2">
             <label className="text-xs font-medium text-emerald-400 shrink-0 flex items-center gap-1.5">
-              <HelpCircle className="w-3.5 h-3.5" />
+              <HelpCircle className="w-3.5 h-3.5 shrink-0" />
               {t.sampleLabel}
             </label>
             <select
@@ -694,7 +707,7 @@ export default function MatryoshkaBenchmarkPage() {
                   runParallelSearch(selectedQ, mrlDimension, lang);
                 }
               }}
-              className="flex-1 bg-slate-900 border border-slate-700/90 hover:border-slate-600 rounded-xl px-3.5 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500 transition cursor-pointer"
+              className="w-full sm:flex-1 bg-slate-900 border border-slate-700/90 hover:border-slate-600 rounded-xl px-3.5 py-2.5 sm:py-2 text-base sm:text-xs text-slate-200 focus:outline-none focus:border-emerald-500 transition cursor-pointer"
             >
               <option value="">{t.samplePlaceholder}</option>
               {SAMPLE_CATEGORIES.map((group) => (
@@ -718,24 +731,24 @@ export default function MatryoshkaBenchmarkPage() {
               e.preventDefault();
               runParallelSearch(query, mrlDimension, lang);
             }}
-            className="flex flex-col sm:flex-row gap-3"
+            className="flex flex-col sm:flex-row gap-2.5 sm:gap-3"
           >
             <div className="relative flex-1">
-              <Search className="w-5 h-5 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
+              <Search className="w-5 h-5 text-slate-400 absolute left-3.5 sm:left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
               <input
                 type="text"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder={t.searchPlaceholder}
-                className="w-full pl-12 pr-4 py-3.5 bg-slate-900 border border-slate-700 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition"
+                className="w-full pl-11 sm:pl-12 pr-4 py-3 sm:py-3.5 bg-slate-900 border border-slate-700 rounded-xl text-base sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition"
               />
             </div>
             <button
               type="submit"
               disabled={loadingLeft || loadingRight}
-              className="px-6 py-3.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-semibold text-sm flex items-center justify-center gap-2 transition shadow-lg shadow-emerald-500/10 shrink-0"
+              className="w-full sm:w-auto px-6 py-3.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 active:scale-[0.99] disabled:opacity-50 text-slate-950 font-semibold text-sm flex items-center justify-center gap-2 transition shadow-lg shadow-emerald-500/10 shrink-0"
             >
-              <Zap className="w-4 h-4 fill-current" />
+              <Zap className="w-4 h-4 fill-current shrink-0" />
               {loadingLeft || loadingRight ? t.searchingBtn : t.searchBtn}
             </button>
           </form>
@@ -747,104 +760,150 @@ export default function MatryoshkaBenchmarkPage() {
             </div>
           )}
 
-          {/* Tarjetas Resumen */}
+          {/* Tarjetas Resumen (2x2 en móvil, 4 columnas en desktop) */}
           {recallStats && tradResult && mrlResult && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-2">
-              <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-medium text-slate-400">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3 pt-1 sm:pt-2">
+              <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-2.5 sm:p-3.5 flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-[11px] sm:text-xs font-medium text-slate-400 truncate">
                     {t.metricMatchTitle}
                   </p>
-                  <p className="text-xl font-bold text-emerald-400 mt-0.5">
+                  <p className="text-base sm:text-xl font-bold text-emerald-400 mt-0.5">
                     {recallStats.pct}%{" "}
-                    <span className="text-xs font-normal text-slate-400">
+                    <span className="block sm:inline text-[10px] sm:text-xs font-normal text-slate-400 truncate">
                       {t.metricMatchSub(recallStats.matched, recallStats.total)}
                     </span>
                   </p>
                 </div>
-                <CheckCircle2 className="w-6 h-6 text-emerald-500/60 shrink-0" />
+                <CheckCircle2 className="hidden sm:block w-6 h-6 text-emerald-500/60 shrink-0" />
               </div>
 
-              <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-medium text-slate-400">
+              <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-2.5 sm:p-3.5 flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-[11px] sm:text-xs font-medium text-slate-400 truncate">
                     {t.metricRamTitle}
                   </p>
-                  <p className="text-xl font-bold text-cyan-400 mt-0.5">
-                    -{mrlResult.ram_savings_pct}% RAM{" "}
-                    <span className="text-xs font-normal text-slate-400">
+                  <p className="text-base sm:text-xl font-bold text-cyan-400 mt-0.5">
+                    -{mrlResult.ram_savings_pct}%{" "}
+                    <span className="block sm:inline text-[10px] sm:text-xs font-normal text-slate-400 truncate">
                       {t.metricRamSub(mrlDimension)}
                     </span>
                   </p>
                 </div>
-                <HardDrive className="w-6 h-6 text-cyan-500/60 shrink-0" />
+                <HardDrive className="hidden sm:block w-6 h-6 text-cyan-500/60 shrink-0" />
               </div>
 
-              <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-medium text-slate-400">
+              <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-2.5 sm:p-3.5 flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-[11px] sm:text-xs font-medium text-slate-400 truncate">
                     {t.metricCloudTitle}
                   </p>
-                  <p className="text-xl font-bold text-amber-300 mt-0.5">
+                  <p className="text-base sm:text-xl font-bold text-amber-300 mt-0.5">
                     {(mrlResult.latency.vector_search_ms / 1000).toFixed(2)} s{" "}
-                    <span className="text-xs font-normal text-slate-400">
+                    <span className="block sm:inline text-[10px] sm:text-xs font-normal text-slate-400 truncate">
                       vs{" "}
                       {(tradResult.latency.vector_search_ms / 1000).toFixed(2)}{" "}
                       s (768D)
                     </span>
                   </p>
                 </div>
-                <Clock className="w-6 h-6 text-amber-500/60 shrink-0" />
+                <Clock className="hidden sm:block w-6 h-6 text-amber-500/60 shrink-0" />
               </div>
 
-              <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-medium text-slate-400">
+              <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-2.5 sm:p-3.5 flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-[11px] sm:text-xs font-medium text-slate-400 truncate">
                     {t.metricDiskTitle}
                   </p>
-                  <p className="text-xl font-bold text-purple-300 mt-0.5">
+                  <p className="text-base sm:text-xl font-bold text-purple-300 mt-0.5">
                     {mrlResult.latency.sqlite_hydration_ms} ms{" "}
-                    <span className="text-xs font-normal text-slate-400">
+                    <span className="block sm:inline text-[10px] sm:text-xs font-normal text-slate-400 truncate">
                       {t.metricDiskSub}
                     </span>
                   </p>
                 </div>
-                <Database className="w-6 h-6 text-purple-500/60 shrink-0" />
+                <Database className="hidden sm:block w-6 h-6 text-purple-500/60 shrink-0" />
               </div>
             </div>
           )}
         </div>
       </section>
 
+      {/* ==================== CONMUTADOR RÁPIDO PARA MÓVIL (< lg) ==================== */}
+      <div className="lg:hidden sticky top-[49px] z-20 bg-slate-950/95 backdrop-blur border-b border-slate-800 px-4 py-2">
+        <div className="grid grid-cols-3 gap-1 bg-slate-900 p-1 rounded-xl border border-slate-800 text-[11px] font-semibold">
+          <button
+            type="button"
+            onClick={() => setMobileTab("mrl")}
+            className={`py-1.5 px-2 rounded-lg transition flex items-center justify-center gap-1 ${
+              mobileTab === "mrl"
+                ? "bg-emerald-500 text-slate-950 shadow"
+                : "text-slate-400 hover:text-slate-200"
+            }`}
+          >
+            🪆 {mrlDimension}D (-{ramSavedPct}%)
+          </button>
+          <button
+            type="button"
+            onClick={() => setMobileTab("trad")}
+            className={`py-1.5 px-2 rounded-lg transition flex items-center justify-center gap-1 ${
+              mobileTab === "trad"
+                ? "bg-blue-500 text-slate-950 shadow"
+                : "text-slate-400 hover:text-slate-200"
+            }`}
+          >
+            🔵 768D (100%)
+          </button>
+          <button
+            type="button"
+            onClick={() => setMobileTab("both")}
+            className={`py-1.5 px-2 rounded-lg transition flex items-center justify-center gap-1 ${
+              mobileTab === "both"
+                ? "bg-slate-700 text-white shadow"
+                : "text-slate-400 hover:text-slate-200"
+            }`}
+          >
+            {lang === "en" ? "⚖️ Both" : "⚖️ Ambos"}
+          </button>
+        </div>
+      </div>
+
       {/* ==================== COMPARATIVA SIDE-BY-SIDE ==================== */}
-      <main className="flex-1 max-w-[1550px] w-full mx-auto px-6 py-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <main className="flex-1 max-w-[1550px] w-full mx-auto px-3.5 sm:px-6 py-4 sm:py-6 grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
         {/* PANEL IZQUIERDO: MODELO ESTÁNDAR 768D */}
-        <section className="flex flex-col rounded-2xl border border-slate-800 bg-slate-900/40 overflow-hidden">
-          <div className="p-4 border-b border-slate-800 bg-slate-900/80 flex items-center justify-between">
-            <div className="flex items-center gap-2.5">
-              <span className="h-3 w-3 rounded-full bg-blue-400" />
-              <div>
-                <h2 className="font-semibold text-sm text-white">
+        <section
+          className={`${
+            mobileTab === "mrl" ? "hidden lg:flex" : "flex"
+          } flex-col rounded-2xl border border-slate-800 bg-slate-900/40 overflow-hidden`}
+        >
+          <div className="p-3.5 sm:p-4 border-b border-slate-800 bg-slate-900/80 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <span className="h-3 w-3 rounded-full bg-blue-400 shrink-0" />
+              <div className="min-w-0">
+                <h2 className="font-semibold text-xs sm:text-sm text-white truncate">
                   {t.leftPanelTitle}
                 </h2>
-                <p className="text-xs text-slate-400">{t.leftPanelSub}</p>
+                <p className="text-[11px] sm:text-xs text-slate-400 truncate">
+                  {t.leftPanelSub}
+                </p>
               </div>
             </div>
-            <span className="text-xs font-medium px-2.5 py-1 rounded-md bg-blue-500/10 text-blue-300 border border-blue-500/30">
+            <span className="text-[11px] sm:text-xs font-medium px-2 sm:px-2.5 py-1 rounded-md bg-blue-500/10 text-blue-300 border border-blue-500/30 shrink-0">
               {t.leftPanelBadge}
             </span>
           </div>
 
-          <div className="p-4 flex-1 space-y-4">
+          <div className="p-3 sm:p-4 flex-1 space-y-4">
             {loadingLeft ? (
               <SkeletonLoader count={topK} />
             ) : tradResult ? (
               <>
                 {tradResult.synthesized_answer && (
-                  <div className="p-4 rounded-xl bg-blue-950/30 border border-blue-500/30 space-y-2">
+                  <div className="p-3.5 sm:p-4 rounded-xl bg-blue-950/30 border border-blue-500/30 space-y-2">
                     <div className="font-semibold text-xs text-blue-300 flex flex-wrap items-center justify-between gap-2">
                       <span className="flex items-center gap-1.5">
-                        <Sparkles className="w-4 h-4" /> {t.leftAiTitle}
+                        <Sparkles className="w-4 h-4 shrink-0" />{" "}
+                        {t.leftAiTitle}
                       </span>
                       <span className="text-[11px] font-normal text-slate-400">
                         {t.clickCitationHint}
@@ -880,25 +939,29 @@ export default function MatryoshkaBenchmarkPage() {
         </section>
 
         {/* PANEL DERECHO: MODELO MATRYOSHKA RECORTADO */}
-        <section className="flex flex-col rounded-2xl border border-emerald-500/30 bg-slate-900/40 overflow-hidden">
-          <div className="p-4 border-b border-slate-800 bg-slate-900/80 flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2.5">
-              <span className="h-3 w-3 rounded-full bg-emerald-400 animate-pulse" />
-              <div>
-                <h2 className="font-semibold text-sm text-white flex items-center gap-2">
-                  {t.rightPanelTitle(mrlDimension)}
-                  <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300">
+        <section
+          className={`${
+            mobileTab === "trad" ? "hidden lg:flex" : "flex"
+          } flex-col rounded-2xl border border-emerald-500/30 bg-slate-900/40 overflow-hidden`}
+        >
+          <div className="p-3.5 sm:p-4 border-b border-slate-800 bg-slate-900/80 flex flex-wrap items-center justify-between gap-2.5 sm:gap-3">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <span className="h-3 w-3 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+              <div className="min-w-0">
+                <h2 className="font-semibold text-xs sm:text-sm text-white flex flex-wrap items-center gap-1.5 sm:gap-2">
+                  <span>{t.rightPanelTitle(mrlDimension)}</span>
+                  <span className="text-[10px] sm:text-[11px] font-semibold px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300">
                     {t.rightPanelBadge(ramSavedPct)}
                   </span>
                 </h2>
-                <p className="text-xs text-slate-400">
+                <p className="text-[11px] sm:text-xs text-slate-400 truncate">
                   {t.rightPanelSub(vectorRatioPct)}
                 </p>
               </div>
             </div>
 
             {/* Selector 128D / 256D / 512D */}
-            <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800">
+            <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 ml-auto sm:ml-0">
               {([128, 256, 512] as DimensionOption[]).map((dim) => {
                 const active = mrlDimension === dim;
                 return (
@@ -906,7 +969,7 @@ export default function MatryoshkaBenchmarkPage() {
                     key={dim}
                     type="button"
                     onClick={() => handleDimensionChange(dim)}
-                    className={`px-3 py-1 rounded-lg text-xs font-semibold transition ${
+                    className={`px-2.5 sm:px-3 py-1 rounded-lg text-xs font-semibold transition ${
                       active
                         ? "bg-emerald-500 text-slate-950 shadow"
                         : "text-slate-400 hover:text-slate-200"
@@ -919,16 +982,16 @@ export default function MatryoshkaBenchmarkPage() {
             </div>
           </div>
 
-          <div className="p-4 flex-1 space-y-4">
+          <div className="p-3 sm:p-4 flex-1 space-y-4">
             {loadingRight ? (
               <SkeletonLoader count={topK} />
             ) : mrlResult ? (
               <>
                 {mrlResult.synthesized_answer && (
-                  <div className="p-4 rounded-xl bg-emerald-950/25 border border-emerald-500/30 space-y-2">
+                  <div className="p-3.5 sm:p-4 rounded-xl bg-emerald-950/25 border border-emerald-500/30 space-y-2">
                     <div className="font-semibold text-xs text-emerald-300 flex flex-wrap items-center justify-between gap-2">
                       <span className="flex items-center gap-1.5">
-                        <Sparkles className="w-4 h-4" />{" "}
+                        <Sparkles className="w-4 h-4 shrink-0" />{" "}
                         {t.rightAiTitle(mrlDimension)}
                       </span>
                       <span className="text-[11px] font-normal text-slate-400">
@@ -1298,32 +1361,41 @@ function OfficialDocumentModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-4xl w-full max-h-[88vh] flex flex-col overflow-hidden shadow-2xl">
-        <div className="p-4 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3 bg-slate-950">
-          <div className="flex items-center gap-2.5">
-            <span className="px-3 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-mono text-sm font-bold">
-              Consulta Vinculante {doc.num_consulta}
-            </span>
-            <span className="text-xs text-slate-400 font-mono">
-              {t.modalDate} {doc.fecha_salida}
-            </span>
+    <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-2 sm:p-4">
+      <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-4xl w-full max-h-[92vh] sm:max-h-[88vh] flex flex-col overflow-hidden shadow-2xl">
+        <div className="p-3 sm:p-4 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2.5 bg-slate-950">
+          <div className="flex items-center justify-between w-full sm:w-auto gap-2.5">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="px-2.5 sm:px-3 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-mono text-xs sm:text-sm font-bold">
+                Consulta {doc.num_consulta}
+              </span>
+              <span className="text-[11px] sm:text-xs text-slate-400 font-mono">
+                {t.modalDate} {doc.fecha_salida}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="sm:hidden p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
+            >
+              <X className="w-5 h-5" />
+            </button>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 w-full sm:w-auto">
             <button
               type="button"
               onClick={() => copyCodeAndOpenPetete(false)}
-              className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 flex items-center gap-1.5 transition"
+              className="px-2.5 sm:px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 flex items-center justify-center gap-1.5 transition shrink-0"
             >
               {copied ? (
                 <>
-                  <Check className="w-3.5 h-3.5 text-emerald-400" />{" "}
+                  <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />{" "}
                   {t.copiedCode(doc.num_consulta)}
                 </>
               ) : (
                 <>
-                  <Copy className="w-3.5 h-3.5" /> {t.copyCode}
+                  <Copy className="w-3.5 h-3.5 shrink-0" /> {t.copyCode}
                 </>
               )}
             </button>
@@ -1331,23 +1403,23 @@ function OfficialDocumentModal({
             <button
               type="button"
               onClick={() => copyCodeAndOpenPetete(true)}
-              className="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold text-xs flex items-center gap-1.5 transition"
+              className="flex-1 sm:flex-initial px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold text-xs flex items-center justify-center gap-1.5 transition truncate"
             >
-              <ExternalLink className="w-3.5 h-3.5" />
-              {t.verifyOfficialWeb}
+              <ExternalLink className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate">{t.verifyOfficialWeb}</span>
             </button>
 
             <button
               type="button"
               onClick={onClose}
-              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
+              className="hidden sm:inline-flex p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
             >
               <X className="w-5 h-5" />
             </button>
           </div>
         </div>
 
-        <div className="p-6 overflow-y-auto space-y-5 text-xs leading-relaxed text-slate-200">
+        <div className="p-3.5 sm:p-6 overflow-y-auto space-y-4 sm:space-y-5 text-xs leading-relaxed text-slate-200">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 bg-slate-950/70 p-3.5 rounded-xl border border-slate-800">
             <div>
               <span className="text-slate-400 block text-[11px]">

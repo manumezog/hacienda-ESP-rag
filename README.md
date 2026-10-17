@@ -1,127 +1,110 @@
-# 🪆 hacienda-ESP-rag — Aprendiendo RAG y Matryoshka Embeddings (MRL) con Datos Reales de Hacienda
+# 🪆 hacienda-ESP-rag — Buscador Fiscal IA sobre 36.053 Consultas Vinculantes de Hacienda (Matryoshka MRL)
 
-> **Un proyecto educativo y experimental de código abierto por [Manuel Mezo](https://cv.manuelmezo.com)**  
-> Demostración práctica de cómo reducir en un **83,3% el consumo de memoria RAM** en bases de datos vectoriales sin perder precisión legal, combinando **Matryoshka Representation Learning (MRL)**, una **NVIDIA Jetson Orin Nano** en local y **Supabase (`pgvector`)** en la nube sobre **36.053 Consultas Vinculantes** de la Dirección General de Tributos (2016–2026).
+> **Un proyecto educativo y experimental open-source por [Manuel Mezo](https://cv.manuelmezo.com)**  
+> Demostración práctica en vivo de cómo reducir en un **83,3% el consumo de memoria RAM** en bases de datos vectoriales manteniendo la calidad de recuperación legal, combinando **Matryoshka Representation Learning (MRL)**, una **NVIDIA Jetson Orin Nano** en el Edge y **Supabase (`pgvector`)** en la nube sobre **36.053 Consultas Vinculantes oficiales** de la Dirección General de Tributos (2016–2026).
+
+### 🌐 Enlaces en Vivo (Live Production)
+* 🚀 **Aplicación Web Interactiva (ES / EN):** **[https://hacienda.mezapps.com](https://hacienda.mezapps.com)** *(Mirror Vercel: [hacienda-esp-rag-q7xl.vercel.app](https://hacienda-esp-rag-q7xl.vercel.app))*
+* 📘 **Documentación Interactiva de la API (Swagger UI):** **[https://api-hacienda.mezapps.com/docs](https://api-hacienda.mezapps.com/docs)**
+* 📕 **Especificación Técnica OpenAPI (ReDoc):** **[https://api-hacienda.mezapps.com/redoc](https://api-hacienda.mezapps.com/redoc)**
+* 🏛️ **Fuente de Datos Oficial:** **[Dirección General de Tributos — Ministerio de Hacienda (PETETE)](https://petete.tributos.hacienda.gob.es/consultas)**
 
 ---
 
 ## 🎯 ¿Cuál es el objetivo educativo de este proyecto?
 
-Cuando alguien empieza a construir sistemas de Inteligencia Artificial con documentos propios (**RAG**), suele encontrarse con dos grandes problemas al pasar de un tutorial de 10 PDFs a una base de datos real con **decenas de miles de documentos largos** (más de 1 GB de texto):
+Cuando alguien pasa de construir un prototipo RAG con 10 PDFs a un corpus jurídico real con **36.053 documentos extensos** (**1,05 GB** de texto legal), aparecen dos cuellos de botella inmediatos:
 
-1. **El coste de la Memoria RAM Vectorial:** Las bases de datos vectoriales necesitan mantener los vectores (listas de números) en memoria RAM para buscar rápido. Un vector estándar tiene **768 o 1.536 dimensiones**. Multiplicado por cientos de miles de fragmentos, la memoria se dispara y supera enseguida las capas gratuitas de servicios en la nube (como el límite de 500 MB de Supabase).
-2. **El coste de almacenar texto pesado en la nube:** Subir gigabytes de leyes completas a una base de datos vectorial en la nube es caro e innecesario si solo necesitas la nube para saber *"qué documento habla de este tema"*.
+1. **El coste de la Memoria RAM Vectorial:** Las bases de datos vectoriales mantienen los vectores en memoria RAM para buscar rápido. Almacenar cientos de miles de vectores completos de `768` o `1536` dimensiones en `float32` dispara el consumo de RAM y desborda las capas gratuitas en la nube (como el límite de 500 MB de Supabase).
+2. **El coste de almacenar texto pesado en la nube:** Subir gigabytes de leyes completas a una base de datos vectorial gestionada es innecesariamente costoso si solo necesitas el índice vectorial para descubrir **qué resolución oficial (`Vxxxx-xx`)** responde a la duda del usuario.
 
-Este proyecto resuelve ambos problemas de forma visual e interactiva para que cualquier persona pueda comprobarlo en tiempo real.
+Este laboratorio resuelve ambos problemas de forma visual e interactiva, comparando en tiempo real y **Side-by-Side** el Top 10 de resoluciones recuperadas por el vector completo (`768D`) frente al vector recortado con **Matryoshka (`128D`, `256D`, `512D`)**.
 
 ---
 
 ## 📚 Conceptos Clave Explicados de Forma Sencilla
 
-### 1. ¿Qué es un RAG (Retrieval-Augmented Generation)?
-Los modelos de lenguaje (como ChatGPT o Gemini) pueden inventar leyes o artículos (*alucinaciones*). Un sistema **RAG** evita esto en 3 pasos:
-1. **Buscar (Retrieval):** Convierte tu pregunta en un vector numérico y busca en una base de datos las resoluciones oficiales de Hacienda más parecidas.
-2. **Leer el documento real:** Extrae el texto oficial íntegro de esas resoluciones.
-3. **Responder con pruebas (Generation):** Le entrega esas leyes al modelo de lenguaje con la orden estricta de responder **únicamente** usando esos documentos y citando su código oficial (ej. `V0703-26`).
+### 1. ¿Qué es un RAG Legal (Retrieval-Augmented Generation)?
+Un LLM generalista puede inventar artículos o leyes (*alucinaciones*). Este sistema **RAG** garantiza rigor jurídico en 3 pasos:
+1. **Retrieval (Búsqueda Semántica):** Convierte la pregunta del ciudadano o asesor en un vector numérico y localiza las **10 Consultas Vinculantes oficiales** (`k = 10`, deduplicadas por `num_consulta`) más afines al caso planteado.
+2. **Hidratación Local:** Extrae el texto oficial íntegro de esas 10 resoluciones desde almacenamiento local en `< 2 ms`.
+3. **Generation (Síntesis con Citas Verificables):** **Gemini 3.8 Flash** redacta una conclusión jurídica estructurada (en **Español 🇪🇸** o **Inglés 🇬🇧**) basándose **exclusivamente** en las consultas recuperadas y generando chips interactivos (`📄 V0703-26`) que abren la resolución oficial completa.
 
 ---
 
 ### 2. ¿Qué es Matryoshka Representation Learning (MRL)? 🪆
-En un modelo de embeddings tradicional, cuando conviertes un texto en una lista de **768 números**, la información del significado está repartida por igual entre los 768 números. Si borras la mitad, el vector deja de funcionar.
+En un modelo de embeddings convencional, la semántica se reparte de forma uniforme entre sus 768 dimensiones: si truncas el vector, destruyes su significado.
 
-Los modelos entrenados con **Matryoshka Representation Learning (MRL)** —como **EmbeddingGemma** de Google— funcionan como una **muñeca rusa (Matryoshka)**:
-* Obligan a la red neuronal durante el entrenamiento a colocar **los conceptos más importantes al principio del vector** (en los primeros 128 números) y dejar los matices secundarios para el final (del 129 al 768).
-* Gracias a esto, podemos **cortar el vector en caliente (`vector[:128]`)** quedándonos solo con la "muñeca pequeña":
+Los modelos entrenados con **Matryoshka Representation Learning (MRL)** —como **EmbeddingGemma** de Google— organizan la información como una **muñeca rusa**:
+* Durante el entrenamiento, la función de pérdida obliga a concentrar **los conceptos nucleares en las primeras coordenadas del vector** (las primeras 128 dimensiones) y delegar los matices finos hacia el final (`129..768`).
+* Esto permite aplicar **truncado dinámico en caliente (`vector[:d]`) + re-normalización L2 ($\|\mathbf{v}\|_2 = 1$)** en tiempo de consulta:
 
-| Modo | Tamaño del Vector | Peso por Fragmento (`float16`) | Ahorro de Memoria | Retención Típica de Calidad |
+| Modo | Dimensiones Activas | Peso por Vector (`halfvec` / `float16`) | Ahorro de RAM Vectorial | Retención Típica de Calidad |
 | :--- | :---: | :---: | :---: | :---: |
-| **RAG Tradicional** | `768 números` | `1.536 Bytes` | 0% (Base) | 100% |
-| **Matryoshka Medio** | `512 números` | `1.024 Bytes` | **-33,3% RAM** | ~98% |
-| **Matryoshka Compacto** | `256 números` | `512 Bytes` | **-66,7% RAM** | ~95% |
-| **Matryoshka Ultraligero** | **`128 números`** | **`256 Bytes`** | **-83,3% RAM** | **~85% – 100%** |
+| **RAG Estándar** | `768D` (100%) | `1.536 Bytes` | 0% (Referencia) | 100% |
+| **Matryoshka Alta** | `512D` (67%) | `1.024 Bytes` | **-33,3% RAM** | ~98% |
+| **Matryoshka Media** | `256D` (33%) | `512 Bytes` | **-66,7% RAM** | ~95% |
+| **Matryoshka Ultraligera** | **`128D` (17%)** | **`256 Bytes`** | **-83,3% RAM** | **~85% – 100%** |
 
 ---
 
-### 3. ¿Qué es el Patrón de "Hidratación Local" (Edge + Cloud)?
-En lugar de subir el **1,05 GB** de textos de Hacienda a Supabase (lo que rompería el límite gratuito de 500 MB en minutos), dividimos el trabajo entre un mini-servidor en casa (**NVIDIA Jetson Orin Nano**) y la nube (**Supabase**):
+### 3. Patrón de "Hidratación Local" (Edge AI + Cloud Vector Index)
+En lugar de alojar el **1,05 GB** de texto en la nube, la arquitectura desacopla el **índice semántico ligero** del **almacenamiento frío del texto**:
 
 ```mermaid
 flowchart LR
-    U["👤 Usuario (Web Next.js)"] -->|"1. Pregunta fiscal"| J["🟢 NVIDIA Jetson Orin (FastAPI)"]
-    J -->|"2. Convierte pregunta en vector (GPU local)"| O["🦙 Ollama (EmbeddingGemma)"]
-    J -->|"3. Busca solo con 128 números vs 768"| S["☁️ Supabase pgvector (Solo IDs + Vectores)"]
-    S -->|"4. Devuelve códigos ganadores (ej. V0703-26)"| J
-    J -->|"5. Hidrata texto completo en 1.5 ms"| DB[("💾 SQLite Local (1.05 GB, 36.053 leyes)")]
-    J -->|"6. Redacta síntesis citando leyes"| LLM["✨ Gemini 3.8 Flash"]
-    J -->|"7. Comparativa Side-by-Side"| U
+    U["👤 Usuario Web / Móvil (Next.js en Vercel)"] -->|"1. Consulta fiscal (ES/EN)"| CF["🛡️ Cloudflare Tunnel (HTTPS + Rate Limit)"]
+    CF -->|"2. Tráfico seguro"| J["🟢 NVIDIA Jetson Orin Nano (FastAPI)"]
+    J -->|"3. Embedding GPU + Truncado MRL"| O["🦙 Ollama Local (EmbeddingGemma)"]
+    J -->|"4. RPC subvector(embedding, 1, d)"| S["☁️ Supabase pgvector (halfvec 768D, ~276 MB)"]
+    S -->|"5. Top-10 IDs únicos (ej. V0703-26)"| J
+    J -->|"6. Hidratación en < 2 ms"| DB[("💾 SQLite Read-Only (1.05 GB, 36.053 consultas)")]
+    J -->|"7. Síntesis jurídica bilingüe"| LLM["✨ Gemini 3.8 Flash"]
+    J -->|"8. Comparativa Side-by-Side 768D vs 128D"| U
 ```
 
-* **En la Nube (Supabase):** Solo guardamos el código de la consulta (`V0703-26`), la fecha y el vector en precisión media (`halfvec`). **0 MB gastados en textos largos.**
-* **En Casa (SQLite en la Jetson):** Cuando Supabase nos dice *"la consulta más relevante es la `V0703-26`"*, nuestro servidor busca `V0703-26` en el archivo SQLite local en **1,5 milisegundos** ("hidratación") y recupera las 15 páginas de ley completas.
+* **En la Nube (Supabase Free Tier):** Se almacena un único vector `halfvec(768)` (`float16`) por fragmento junto con el identificador `num_consulta` (`Vxxxx-xx`), ocupando **~276 MB en total** (dentro de los 500 MB gratuitos) y ejecutando `subvector(embedding, 1, match_dimensions)` en SQL.
+* **En el Edge (NVIDIA Jetson Orin Nano 24/7):** Genera los embeddings en GPU local, hidrata en `< 2 ms` los textos completos desde `consultas_vinculantes.db` (abierta en modo estricto de solo lectura `?mode=ro`) y expone la API de forma segura mediante **Cloudflare Zero Trust Tunnel** sin abrir puertos en el router.
 
 ---
 
-## 🛠️ Estructura del Proyecto
+## 🔒 Seguridad y Protección en Producción
+
+* **Cero Exposición de Red Local:** Tráfico enrutado íntegramente a través de **Cloudflare Named Tunnel** (`https://api-hacienda.mezapps.com`) con TLS/HTTPS extremo a extremo.
+* **Doble Rate Limiting por IP Real (`CF-Connecting-IP`):** Máximo **10 peticiones/minuto** y **200 peticiones/día (24h)** por IP para proteger la GPU de la Jetson y la cuota de inferencia.
+* **SQLite Inmutable (`?mode=ro`) y Consultas Parametrizadas:** Conexión a base de datos en modo solo lectura a nivel de driver y validación estricta con Pydantic (`max_length=1500`).
+* **Defensa Anti-Prompt Injection:** Delimitación estructural XML (`<user_query>` / `<dgt_context>`) en el prompt de sistema del LLM.
+
+---
+
+## 🛠️ Estructura del Repositorio
 
 ```text
 .
 ├── backend/
-│   ├── main.py                  # Servidor FastAPI (Truncado Matryoshka, RPC Supabase, Hidratación SQLite y Síntesis Gemini)
-│   ├── ingest_to_supabase.py    # Ingesta por lotes GPU con inyección de cabeceras contextuales
-│   ├── supabase_schema.sql      # Esquema PostgreSQL con pgvector halfvec(768) y slicing dinámico subvector()
-│   ├── requirements.txt         # Dependencias de Python
-│   └── .env.example             # Plantilla de configuración
+│   ├── main.py                  # Orquestador FastAPI (Truncado MRL, RPC Supabase, Hidratación SQLite RO, Rate Limit y Gemini)
+│   ├── ingest_to_supabase.py    # Ingesta por lotes GPU (batch=32) con checkpointing e inyección de cabeceras contextuales
+│   ├── supabase_schema.sql      # Esquema PostgreSQL pgvector halfvec(768) y función RPC match_documents con subvector()
+│   ├── requirements.txt         # Dependencias del backend Python
+│   └── .env.example             # Plantilla de variables de entorno (sin claves)
 ├── frontend/
-│   └── src/app/page.tsx         # Interfaz Educativa Side-by-Side en Next.js + Tailwind CSS
-├── scraper_petete.py            # Scraper resiliente para el buscador PETETE de la DGT (Knosys)
-├── merge_db.py                  # Utilidad para fusionar bases de datos SQLite recolectadas en paralelo
-└── consultas_vinculantes.db     # [Ignorado en Git] Base de datos SQLite local (1.05 GB, 36.053 consultas)
+│   └── src/app/
+│       ├── page.tsx             # UI Educativa Bilingüe (ES/EN), Responsive Mobile y Comparador Side-by-Side
+│       ├── layout.tsx           # Metadatos SEO y OpenGraph
+│       └── icon.svg             # Favicon vectorial personalizado
+├── scraper_petete.py            # Scraper asíncrono resiliente para el portal PETETE de la DGT
+├── merge_db.py                  # Utilidad para unificar bases de datos SQLite recolectadas en paralelo
+└── consultas_vinculantes.db     # [Ignorado en Git] Corpus SQLite local (1.05 GB, 36.053 Consultas Vinculantes 2016–2026)
 ```
-
----
-
-## 🚀 Cómo Ejecutar el Proyecto Paso a Paso
-
-### 1. Base de Datos Vectorial en Supabase
-Crea un proyecto gratuito en [Supabase](https://supabase.com), abre el **SQL Editor** y ejecuta el archivo [`backend/supabase_schema.sql`](./backend/supabase_schema.sql).
-
-### 2. Backend e Ingesta (En NVIDIA Jetson Orin o PC Local)
-```bash
-# Descargar el modelo Matryoshka en Ollama
-ollama pull embeddinggemma
-
-# Configurar el entorno de Python
-cd backend
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env
-```
-Completa `SUPABASE_URL`, `SUPABASE_KEY` y `GEMINI_API_KEY` en `backend/.env` y lanza el servidor:
-```bash
-# Iniciar la ingesta hacia Supabase
-python3 ingest_to_supabase.py
-
-# Levantar la API en el puerto 8000
-uvicorn main:app --host 0.0.0.0 --port 8000
-```
-
-### 3. Frontend Interactivo (Next.js)
-```bash
-cd frontend
-npm install
-npm run dev
-```
-Abre `http://localhost:3000` en tu navegador para explorar la guía educativa y comparar búsquedas en `768D` frente a `128D`, `256D` y `512D`.
 
 ---
 
 ## 👤 Autor y Contacto
 
-Proyecto desarrollado con fines educativos y de divulgación tecnológica por **Manuel Mezo**:
+Proyecto diseñado y desarrollado por **Manuel Mezo**:
 
-* 🌐 **Web Personal / CV:** [cv.manuelmezo.com](https://cv.manuelmezo.com)
+* 🌐 **Web Personal / Portfolio:** [cv.manuelmezo.com](https://cv.manuelmezo.com)
+* 🚀 **Demo en Vivo:** [hacienda.mezapps.com](https://hacienda.mezapps.com)
 * 💻 **GitHub:** [@manumezog](https://github.com/manumezog)
 * 💼 **LinkedIn:** [linkedin.com/in/manuelmezo](https://www.linkedin.com/in/manuelmezo/)
 * ✉️ **Email:** [manumezog@gmail.com](mailto:manumezog@gmail.com)
-* 🏛️ **Fuente de Datos Oficial:** [Dirección General de Tributos — Ministerio de Hacienda (PETETE)](https://petete.tributos.hacienda.gob.es/consultas)
