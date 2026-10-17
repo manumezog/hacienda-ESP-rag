@@ -2,9 +2,20 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Hacienda-ESP-RAG | Matryoshka (MRL) Legal Benchmark",
+  title: "Consultas Vinculantes DGT · Buscador Fiscal IA (36.053 Resoluciones)",
   description:
-    "DevTool interactiva comparando RAG Tradicional (768D) vs Edge RAG Matryoshka (128D/256D/512D) con EmbeddingGemma, Supabase pgvector e hidratación local en SQLite.",
+    "Buscador inteligente sobre 36.053 Consultas Vinculantes de la Dirección General de Tributos (Hacienda Española) con IA y compresión vectorial Matryoshka (MRL). Desarrollado por Manuel Mezo.",
+  applicationName: "Buscador DGT · Hacienda IA",
+  authors: [{ name: "Manuel Mezo", url: "https://cv.manuelmezo.com" }],
+  openGraph: {
+    title: "Consultas Vinculantes DGT · Buscador Fiscal IA (36.053 Resoluciones)",
+    description:
+      "Compara en tiempo real búsqueda vectorial completa (768D) frente a Matryoshka (128D, -83% RAM) sobre 36.053 Consultas Vinculantes de Hacienda.",
+    url: "https://hacienda.mezapps.com",
+    siteName: "Buscador Fiscal IA · Consultas Vinculantes DGT",
+    locale: "es_ES",
+    type: "website",
+  },
 };
 
 export default function RootLayout({

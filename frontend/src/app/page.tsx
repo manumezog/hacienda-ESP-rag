@@ -70,22 +70,28 @@ const SAMPLE_CATEGORIES: SampleCategory[] = [
     categoryEn: "🏠 Income Tax (IRPF) & Housing",
     items: [
       {
-        labelEs: "Reinversión en vivienda habitual comprando antes de vender",
-        labelEn: "Main home reinvestment exemption when buying before selling",
+        labelEs:
+          "¿Pago IRPF al vender mi casa si compré la nueva vivienda habitual antes de vender la anterior?",
+        labelEn:
+          "Do I pay tax when selling my home if I bought my new main residence before selling the old one?",
         query:
-          "Exención por reinversión en vivienda habitual en el IRPF cuando se compra la nueva vivienda antes de vender la anterior",
+          "¿Tengo que pagar IRPF al vender mi casa si me he comprado la nueva vivienda habitual antes de vender la anterior? Exención por reinversión en vivienda habitual",
       },
       {
-        labelEs: "Deducción por obras de eficiencia energética en vivienda",
-        labelEn: "Tax deduction for home energy efficiency renovation works",
+        labelEs:
+          "He hecho obras en casa para mejorar la eficiencia energética, ¿cuánto me puedo deducir en la Renta?",
+        labelEn:
+          "I renovated my home to improve energy efficiency — how much can I deduct on my income tax?",
         query:
-          "Requisitos y base máxima de la deducción por obras de mejora de la eficiencia energética en viviendas en el IRPF",
+          "He hecho obras en casa para mejorar el aislamiento y la eficiencia energética, ¿qué requisitos hay y cuánto me puedo deducir como máximo en el IRPF?",
       },
       {
-        labelEs: "Indemnización por despido improcedente y límites de exención",
-        labelEn: "Severance pay tax exemption limits for unfair dismissal",
+        labelEs:
+          "Me han despedido de forma improcedente, ¿está libre de impuestos la indemnización en el IRPF?",
+        labelEn:
+          "I was unfairly dismissed — is my severance pay exempt from income tax?",
         query:
-          "Exención en el IRPF de la indemnización por despido improcedente y requisitos de desvinculación con la empresa",
+          "Me han despedido de forma improcedente, ¿hasta qué límite está exenta de IRPF la indemnización por despido y qué requisitos de desvinculación pide Hacienda?",
       },
     ],
   },
@@ -94,22 +100,28 @@ const SAMPLE_CATEGORIES: SampleCategory[] = [
     categoryEn: "🧾 VAT (IVA), Freelancers & Consumption",
     items: [
       {
-        labelEs: "Tipo de IVA en servicios de artistas, cantantes y animación",
-        labelEn: "Applicable VAT rate for performers, singers, and entertainers",
+        labelEs:
+          "Soy autónomo y uso mi coche para trabajar, ¿cuánto IVA del coche y de la gasolina me puedo deducir?",
+        labelEn:
+          "I'm self-employed and use my car for work — how much VAT on the car and fuel can I deduct?",
         query:
-          "Tipo impositivo de IVA aplicable a los servicios prestados por animadores de fiestas infantiles y cantantes en eventos",
+          "Soy autónomo y utilizo mi vehículo turismo para mi actividad profesional, ¿qué porcentaje del IVA soportado en la compra del coche y el combustible puedo deducirme?",
       },
       {
-        labelEs: "Traspaso de negocio completo (No sujeción a IVA art. 7.1º)",
-        labelEn: "Transfer of a going concern (VAT non-subjection rule art. 7.1)",
+        labelEs:
+          "Voy a traspasar mi negocio entero con local y mobiliario, ¿la venta lleva IVA o está exenta?",
+        labelEn:
+          "I'm transferring my entire business with premises and equipment — is it subject to VAT?",
         query:
-          "Transmisión de un conjunto empresarial o rama de actividad y supuesto de no sujeción al IVA del artículo 7.1 de la Ley 37/1992",
+          "Voy a traspasar mi negocio completo (conjunto empresarial con local, existencias y mobiliario) a otro empresario, ¿está no sujeto a IVA por el artículo 7.1?",
       },
       {
-        labelEs: "Deducción de gastos de vehículo y combustible en autónomos",
-        labelEn: "VAT deduction on car and fuel expenses for self-employed",
+        labelEs:
+          "Soy cantante y animador de fiestas infantiles, ¿debo cobrar el 10% o el 21% de IVA en mis facturas?",
+        labelEn:
+          "I'm a singer and children's party entertainer — should I charge 10% or 21% VAT on my invoices?",
         query:
-          "Porcentaje de deducción del IVA soportado en la adquisición y combustible de un vehículo turismo utilizado por un profesional autónomo",
+          "Soy cantante y animador de fiestas infantiles y eventos, ¿qué tipo impositivo de IVA (10% reducido o 21% general) debo aplicar en mis facturas?",
       },
     ],
   },
@@ -118,16 +130,20 @@ const SAMPLE_CATEGORIES: SampleCategory[] = [
     categoryEn: "🏢 Corporate Tax & Startups",
     items: [
       {
-        labelEs: "Tipo reducido del 15% para Startups certificadas por ENISA",
-        labelEn: "15% reduced Corporate Tax rate for ENISA-certified Startups",
+        labelEs:
+          "Tenemos una startup certificada por ENISA, ¿podemos pagar solo el 15% en el Impuesto sobre Sociedades?",
+        labelEn:
+          "We have an ENISA-certified startup — can we pay the reduced 15% Corporate Tax rate?",
         query:
-          "Aplicación del tipo impositivo reducido del 15% en el Impuesto sobre Sociedades para empresa emergente certificada por ENISA en grupo fiscal",
+          "Hemos creado una startup certificada por ENISA como empresa emergente, ¿podemos aplicar el tipo impositivo reducido del 15% en el Impuesto sobre Sociedades?",
       },
       {
-        labelEs: "Exención por dividendos y venta de participaciones (art. 21 LIS)",
-        labelEn: "Participation exemption on dividends and capital gains (art. 21)",
+        labelEs:
+          "Nuestra empresa cobra dividendos de una filial, ¿qué requisitos hay para que estén exentos al 95%?",
+        labelEn:
+          "Our company receives dividends from a subsidiary — what are the requirements for the participation exemption?",
         query:
-          "Requisitos de participación mínima y mantenimiento de 1 año para la exención sobre dividendos del artículo 21 de la Ley del Impuesto sobre Sociedades",
+          "Nuestra sociedad tiene participaciones en otra empresa, ¿qué porcentaje mínimo y tiempo de mantenimiento de 1 año se exige para la exención sobre dividendos del artículo 21 LIS?",
       },
     ],
   },
@@ -136,16 +152,20 @@ const SAMPLE_CATEGORIES: SampleCategory[] = [
     categoryEn: "🏛️ Wealth, Inheritance & Gift Tax",
     items: [
       {
-        labelEs: "Exención de empresa familiar en el Impuesto sobre el Patrimonio",
-        labelEn: "Family business exemption in Spanish Wealth Tax (art. 4.Ocho)",
+        labelEs:
+          "Tengo participaciones en la empresa familiar, ¿cómo consigo que estén exentas en el Impuesto sobre el Patrimonio?",
+        labelEn:
+          "I own shares in our family business — how do they qualify for the Wealth Tax exemption?",
         query:
-          "Exención en el Impuesto sobre el Patrimonio del artículo 4.Ocho.Dos por participaciones en entidades y activos afectos a la actividad económica",
+          "Tengo participaciones en una empresa familiar, ¿qué requisitos pide el artículo 4.Ocho.Dos para que estén exentas en el Impuesto sobre el Patrimonio?",
       },
       {
-        labelEs: "Donación de derechos o participaciones de padres a hijos",
-        labelEn: "Taxation of gifts and rights transferred from parents to children",
+        labelEs:
+          "Mis padres quieren donarme bienes o derechos en vida, ¿qué impuestos se pagan por la donación?",
+        labelEn:
+          "My parents want to gift me assets or rights during their lifetime — how is the gift taxed?",
         query:
-          "Tributación y valoración en el Impuesto sobre Sucesiones y Donaciones de la cesión gratuita o donación de derechos de padres a hijos",
+          "Mis padres quieren hacerme una donación o cesión gratuita de derechos a favor de los hijos, ¿cómo tributa y se valora en el Impuesto sobre Sucesiones y Donaciones?",
       },
     ],
   },
@@ -154,16 +174,20 @@ const SAMPLE_CATEGORIES: SampleCategory[] = [
     categoryEn: "🌍 Crypto Assets & International Tax (Beckham Law)",
     items: [
       {
-        labelEs: "Pérdidas por estafas o quiebras en plataformas de criptomonedas",
-        labelEn: "Capital losses from crypto exchange bankruptcy or fraud",
+        labelEs:
+          "Me han estafado en una plataforma de criptomonedas, ¿puedo declarar el dinero perdido en la Renta?",
+        labelEn:
+          "I was scammed on a crypto platform — can I deduct the lost money as a capital loss on my tax return?",
         query:
-          "Imputación temporal en el IRPF de pérdidas patrimoniales derivadas de estafas o insolvencia de plataformas de inversión o criptoactivos",
+          "Me han estafado o ha quebrado una plataforma de inversión y criptoactivos y he perdido mis ahorros, ¿cuándo y cómo puedo imputar esa pérdida patrimonial en el IRPF?",
       },
       {
-        labelEs: "Régimen especial de impatriados (Ley Beckham art. 93 LIRPF)",
-        labelEn: "Special expat tax regime in Spain (Beckham Law art. 93)",
+        labelEs:
+          "Me mudo a trabajar a España desde el extranjero, ¿cómo puedo acogerme a la Ley Beckham?",
+        labelEn:
+          "I'm relocating to Spain for work — what are the requirements to apply for the Beckham Law expat tax regime?",
         query:
-          "Requisitos para acogerse al régimen especial de trabajadores desplazados a territorio español del artículo 93 de la LIRPF",
+          "Me desplazo a vivir y trabajar a España por un nuevo contrato laboral, ¿qué requisitos debo cumplir para acogerme al régimen especial de impatriados (Ley Beckham, artículo 93 LIRPF)?",
       },
     ],
   },
@@ -348,7 +372,7 @@ export default function MatryoshkaBenchmarkPage() {
     SAMPLE_CATEGORIES[0].items[0].query
   );
   const [mrlDimension, setMrlDimension] = useState<DimensionOption>(128);
-  const [topK] = useState<number>(5);
+  const [topK] = useState<number>(10);
   const [generateAnswer, setGenerateAnswer] = useState<boolean>(true);
 
   const [showEduGuide, setShowEduGuide] = useState<boolean>(true);
@@ -421,6 +445,12 @@ export default function MatryoshkaBenchmarkPage() {
   const handleLanguageChange = (newLang: Lang) => {
     if (newLang === lang) return;
     setLang(newLang);
+    if (typeof document !== "undefined") {
+      document.title =
+        newLang === "es"
+          ? "Consultas Vinculantes DGT · Buscador Fiscal IA (36.053 Resoluciones)"
+          : "Spanish Tax Rulings (DGT) · AI Legal Search (36,053 Rulings)";
+    }
     if (tradResult && query.trim()) {
       runParallelSearch(query, mrlDimension, newLang);
     }
@@ -674,8 +704,7 @@ export default function MatryoshkaBenchmarkPage() {
                 >
                   {group.items.map((item, i) => (
                     <option key={i} value={item.query}>
-                      {lang === "en" ? item.labelEn : item.labelEs} — &ldquo;
-                      {item.query.slice(0, 85)}...&rdquo;
+                      {lang === "en" ? item.labelEn : item.labelEs}
                     </option>
                   ))}
                 </optgroup>
@@ -984,6 +1013,15 @@ export default function MatryoshkaBenchmarkPage() {
             >
               <Globe className="w-3.5 h-3.5" />
               cv.manuelmezo.com
+            </a>
+            <a
+              href="https://api-hacienda.mezapps.com/docs"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1.5 text-slate-300 hover:text-emerald-400 transition font-medium"
+            >
+              <Database className="w-3.5 h-3.5" />
+              API Docs (Swagger)
             </a>
             <a
               href="https://github.com/manumezog/hacienda-ESP-rag"

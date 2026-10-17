@@ -45,12 +45,19 @@ _ip_minute_log: Dict[str, Deque[float]] = defaultdict(deque)
 _ip_day_log: Dict[str, Deque[float]] = defaultdict(deque)
 
 app = FastAPI(
-    title="Hacienda-ESP-RAG API (Matryoshka Edge + Cloud)",
-    description="Orquestador híbrido con truncado Matryoshka (MRL), búsqueda en Supabase pgvector (halfvec) e hidratación local desde SQLite.",
-    version="1.1.0",
-    # Ocultar Swagger/OpenAPI público en producción salvo que ENABLE_DOCS=true
-    docs_url="/docs" if os.getenv("ENABLE_DOCS", "false").lower() == "true" else None,
-    redoc_url=None,
+    title="Hacienda-ESP-RAG API · Consultas Vinculantes DGT (Matryoshka MRL)",
+    description=(
+        "API pública de búsqueda vectorial e hidratación local sobre **36.053 Consultas Vinculantes "
+        "de la Dirección General de Tributos (Hacienda Española, 2016–2026)**.\n\n"
+        "### Arquitectura Híbrida (Edge + Cloud)\n"
+        "- **Embeddings & Recorte Matryoshka (MRL):** `embeddinggemma` en NVIDIA Jetson Orin (`128D`, `256D`, `512D`, `768D`) con re-normalización L2.\n"
+        "- **Índice Vectorial Cloud:** Supabase PostgreSQL (`pgvector` `halfvec(768)` con `subvector()` dinámico).\n"
+        "- **Hidratación Local (Cold Storage):** SQLite local de solo lectura (`?mode=ro`, 1.05 GB) en < 2 ms.\n"
+        "- **Límites de Uso (Rate Limit):** Máximo **10 peticiones/minuto** y **200 peticiones/día** por IP."
+    ),
+    version="1.2.0",
+    docs_url="/docs",
+    redoc_url="/redoc",
 )
 
 app.add_middleware(
@@ -131,7 +138,7 @@ class SearchRequest(BaseModel):
         default=128,
         description="Dimensiones Matryoshka (128, 256, 512 o 768)",
     )
-    top_k: int = Field(default=5, ge=1, le=10, description="Número de documentos a recuperar (1 a 10)")
+    top_k: int = Field(default=10, ge=1, le=20, description="Número de documentos a recuperar (1 a 20, por defecto 10)")
     generate_answer: bool = Field(
         default=True,
         description="Si es True, genera síntesis jurídica con LLM usando el contexto hidratado",
