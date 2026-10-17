@@ -224,9 +224,20 @@ async def generate_llm_response(query: str, docs: List[HydratedDocument]) -> Opt
         return None
 
     load_dotenv(override=True)
-    openrouter_key = os.getenv("OPENROUTER_API_KEY", "").strip()
-    gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
+    raw_or_key = os.getenv("OPENROUTER_API_KEY", "").strip()
+    raw_gem_key = os.getenv("GEMINI_API_KEY", "").strip()
     llm_model = os.getenv("LLM_MODEL", "google/gemini-2.0-flash-001").strip()
+
+    placeholders = {"", "TU_CLAVE_AQUI", "PEGAR_AQUI_TU_GEMINI_KEY", "tu-api-key"}
+    openrouter_key = "" if raw_or_key in placeholders else raw_or_key
+    gemini_key = "" if raw_gem_key in placeholders else raw_gem_key
+
+    # Si la clave de Gemini (empieza por AIza) se pegó en OPENROUTER_API_KEY, usarla como gemini_key
+    if not gemini_key and openrouter_key.startswith("AIza"):
+        gemini_key = openrouter_key
+        openrouter_key = ""
+    elif gemini_key.startswith("AIza") and not openrouter_key.startswith("sk-or-"):
+        openrouter_key = ""
 
     context_blocks = []
     for d in docs[:3]:
@@ -245,10 +256,10 @@ async def generate_llm_response(query: str, docs: List[HydratedDocument]) -> Opt
         "proporcionadas en el contexto. Cita siempre el número de consulta vinculante (ej. V1234-23) y la normativa aplicable."
     )
 
-    last_error = None
+    errors = []
 
     if gemini_key:
-        gemini_models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-flash-lite"]
+        gemini_models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
         async with httpx.AsyncClient(timeout=45.0) as client:
             for g_model in gemini_models:
                 try:
@@ -270,9 +281,9 @@ async def generate_llm_response(query: str, docs: List[HydratedDocument]) -> Opt
                         if candidates:
                             return candidates[0]["content"]["parts"][0]["text"]
                     else:
-                        last_error = f"Gemini ({g_model}) HTTP {resp.status_code}: {resp.text[:200]}"
+                        errors.append(f"Gemini ({g_model}) HTTP {resp.status_code}: {resp.text[:180]}")
                 except Exception as exc:
-                    last_error = f"Error de red Gemini ({g_model}): {exc}"
+                    errors.append(f"Error red Gemini ({g_model}): {exc}")
 
     if openrouter_key:
         async with httpx.AsyncClient(timeout=45.0) as client:
@@ -292,15 +303,15 @@ async def generate_llm_response(query: str, docs: List[HydratedDocument]) -> Opt
                 if resp.status_code == 200:
                     return resp.json()["choices"][0]["message"]["content"]
                 else:
-                    last_error = f"OpenRouter HTTP {resp.status_code}: {resp.text[:200]}"
+                    errors.append(f"OpenRouter HTTP {resp.status_code}: {resp.text[:180]}")
             except Exception as exc:
-                last_error = f"Error de red OpenRouter: {exc}"
+                errors.append(f"Error red OpenRouter: {exc}")
 
     if not gemini_key and not openrouter_key:
-        return "⚠️ No se detectó GEMINI_API_KEY ni OPENROUTER_API_KEY en el archivo backend/.env de la Jetson."
+        return "⚠️ No hay GEMINI_API_KEY configurada en backend/.env de la Jetson."
 
-    if last_error:
-        return f"⚠️ No se pudo generar la síntesis LLM ({last_error})"
+    if errors:
+        return f"⚠️ No se pudo generar la síntesis LLM: {' | '.join(errors)}"
 
     return None
 
