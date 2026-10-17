@@ -333,8 +333,11 @@ const PETETE_OFFICIAL_URL =
   "https://petete.tributos.hacienda.gob.es/consultas";
 
 // URL oficial del Backend en la Jetson Orin expuesta vía Cloudflare Tunnel HTTPS
+const _rawEnvApiUrl = process.env.NEXT_PUBLIC_API_URL || "";
 const BACKEND_API_URL = (
-  process.env.NEXT_PUBLIC_API_URL || "https://api-hacienda.mezapps.com"
+  _rawEnvApiUrl && !_rawEnvApiUrl.includes("manuelmezo.com")
+    ? _rawEnvApiUrl
+    : "https://api-hacienda.mezapps.com"
 ).replace(/\/+$/, "");
 
 export default function MatryoshkaBenchmarkPage() {
