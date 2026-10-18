@@ -456,20 +456,24 @@ export default function AdminDashboardPage() {
               <tbody className="divide-y divide-slate-800/60 font-mono text-[11px]">
                 {data?.recent_searches.map((s) => (
                   <tr key={s.id} className="hover:bg-slate-950/60">
-                    <td className="py-2 px-2 text-slate-400">
+                    <td className="py-2 px-2 text-slate-400 whitespace-nowrap">
                       {s.created_at.slice(11, 19)}
                     </td>
-                    <td className="py-2 px-2 text-slate-200 max-w-md truncate font-sans">
+                    <td className="py-2 px-2 text-slate-200 max-w-xl break-words font-sans">
                       {s.query}
                     </td>
                     <td className="py-2 px-2 text-emerald-400">
                       {s.dimensions}D
                     </td>
-                    <td className="py-2 px-2">
-                      {s.search_backend === "supabase_pgvector" ? (
-                        <span className="text-blue-300">Supabase</span>
+                    <td className="py-2 px-2 whitespace-nowrap">
+                      {s.search_backend === "jetson_local_vectors" ? (
+                        <span className="text-emerald-400 font-bold">
+                          🟢 Jetson Vector
+                        </span>
+                      ) : s.search_backend === "supabase_pgvector" ? (
+                        <span className="text-blue-300">☁️ Supabase</span>
                       ) : (
-                        <span className="text-amber-300">SQLite Local</span>
+                        <span className="text-amber-300">⚡ SQLite Léxico</span>
                       )}
                     </td>
                     <td className="py-2 px-2">

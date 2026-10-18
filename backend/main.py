@@ -179,8 +179,8 @@ class SearchRequest(BaseModel):
     query: str = Field(
         ...,
         min_length=3,
-        max_length=1500,
-        description="Consulta fiscal o tributaria en lenguaje natural (máx. 1500 caracteres)",
+        max_length=4000,
+        description="Consulta fiscal o tributaria en lenguaje natural (máx. 4000 caracteres)",
     )
     dimensions: Literal[128, 256, 512, 768] = Field(
         default=128,
@@ -232,13 +232,13 @@ class SearchResponse(BaseModel):
     results: List[HydratedDocument]
     synthesized_answer: Optional[str] = None
     llm_status: Literal["ok", "skipped", "quota_exceeded", "invalid_key", "error"] = "ok"
-    search_backend: Literal["supabase_pgvector", "sqlite_local_fallback"] = "supabase_pgvector"
+    search_backend: Literal["supabase_pgvector", "sqlite_local_fallback", "jetson_local_vectors"] = "supabase_pgvector"
 
 
 class FeedbackRequest(BaseModel):
     rating: Literal["like", "dislike", "bug"] = Field(..., description="Tipo de feedback: 'like', 'dislike' o 'bug'")
-    comment: Optional[str] = Field(default="", max_length=1000, description="Comentario opcional o reporte de fallo")
-    query: Optional[str] = Field(default="", max_length=500, description="Consulta activa cuando se envió el feedback")
+    comment: Optional[str] = Field(default="", max_length=2000, description="Comentario opcional o reporte de fallo")
+    query: Optional[str] = Field(default="", max_length=4000, description="Consulta activa cuando se envió el feedback")
     lang: Literal["es", "en"] = Field(default="es")
 
 
@@ -320,6 +320,7 @@ _LOCAL_VEC_PATH = Path(__file__).resolve().parent.parent / "local_vectors_fp16.n
 _LOCAL_META_PATH = Path(__file__).resolve().parent.parent / "local_chunks_meta.json"
 _local_vec_matrix = None
 _local_vec_meta: Optional[List[dict]] = None
+_local_vec_mtime: float = 0.0
 
 
 def search_local_numpy_vectors(
@@ -330,17 +331,19 @@ def search_local_numpy_vectors(
     Aplica slicing real sobre la matriz [:, :dimensions], re-normalización L2 y producto
     escalar coseno exacto en < 25 ms si local_vectors_fp16.npy está descargado.
     """
-    global _local_vec_matrix, _local_vec_meta
+    global _local_vec_matrix, _local_vec_meta, _local_vec_mtime
     if not (_LOCAL_VEC_PATH.exists() and _LOCAL_META_PATH.exists()):
         return []
     try:
         import json as _json
         import numpy as np
 
-        if _local_vec_matrix is None or _local_vec_meta is None:
+        cur_mtime = _LOCAL_VEC_PATH.stat().st_mtime
+        if _local_vec_matrix is None or _local_vec_meta is None or cur_mtime != _local_vec_mtime:
             _local_vec_matrix = np.load(str(_LOCAL_VEC_PATH), mmap_mode="r")
             with open(_LOCAL_META_PATH, "r", encoding="utf-8") as f:
                 _local_vec_meta = _json.load(f)
+            _local_vec_mtime = cur_mtime
 
         q = np.asarray(truncated_vector[:dimensions], dtype=np.float32)
         q_norm = np.linalg.norm(q)
@@ -394,7 +397,12 @@ async def query_supabase_matches(
     cache_tuple = (query_key.strip().lower(), dimensions, top_k)
     if cache_tuple in _vector_search_cache:
         _vector_search_cache.move_to_end(cache_tuple)
-        return _vector_search_cache[cache_tuple], "supabase_pgvector"
+        backend_label = (
+            "jetson_local_vectors"
+            if (_LOCAL_VEC_PATH.exists() and _LOCAL_META_PATH.exists())
+            else "supabase_pgvector"
+        )
+        return _vector_search_cache[cache_tuple], backend_label
 
     if _LOCAL_VEC_PATH.exists() and _LOCAL_META_PATH.exists():
         local_matches = await asyncio.to_thread(
@@ -404,7 +412,7 @@ async def query_supabase_matches(
             _vector_search_cache[cache_tuple] = local_matches
             if len(_vector_search_cache) > _EMBED_CACHE_MAX:
                 _vector_search_cache.popitem(last=False)
-            return local_matches, "supabase_pgvector"
+            return local_matches, "jetson_local_vectors"
 
     if SUPABASE_URL and SUPABASE_KEY:
         rpc_url = f"{SUPABASE_URL}/rest/v1/rpc/match_documents"
@@ -1013,7 +1021,7 @@ def log_search_event(
                 """,
                 (
                     datetime.now(timezone.utc).isoformat(),
-                    query[:500],
+                    query[:4000],
                     dimensions,
                     lang,
                     search_backend,
@@ -1075,6 +1083,18 @@ async def health_check():
     except Exception:
         pass
 
+    local_vec_ok = _LOCAL_VEC_PATH.exists() and _LOCAL_META_PATH.exists()
+    local_vec_count = 0
+    local_vec_mb = 0.0
+    if local_vec_ok:
+        try:
+            import numpy as np
+            m = np.load(str(_LOCAL_VEC_PATH), mmap_mode="r")
+            local_vec_count = int(m.shape[0])
+            local_vec_mb = round(_LOCAL_VEC_PATH.stat().st_size / (1024 * 1024), 1)
+        except Exception:
+            pass
+
     return {
         "status": "ok" if (sqlite_ok and ollama_ok) else "degraded",
         "sqlite_cold_storage": {
@@ -1084,6 +1104,11 @@ async def health_check():
         "ollama_edge_engine": {
             "connected": ollama_ok,
             "configured_model": OLLAMA_EMBED_MODEL,
+        },
+        "local_vector_engine": {
+            "active": local_vec_ok and local_vec_count > 0,
+            "vectors_count": local_vec_count,
+            "size_mb": local_vec_mb,
         },
         "supabase_cloud": {
             "configured": bool(SUPABASE_URL and SUPABASE_KEY),
@@ -1128,7 +1153,7 @@ async def search_consultas(req: SearchRequest, request: Request):
         asyncio.create_task(
             send_alert_notification(
                 title="Supabase Timeout -> SQLite Fallback Activado",
-                body=f"La consulta '{req.query[:120]}' ({req.dimensions}D) usó el fallback local de SQLite en la Jetson.",
+                body=f"La consulta '{req.query}' ({req.dimensions}D) usó el fallback local de SQLite en la Jetson.",
                 priority="default",
                 tags="warning,database",
                 cooldown_key="supabase_fallback",
@@ -1164,7 +1189,7 @@ async def search_consultas(req: SearchRequest, request: Request):
                     send_alert_notification(
                         title="Cuota gratuita LLM alcanzada (429)",
                         body=(
-                            f"La clave gratuita del servidor alcanzó el límite en la consulta: '{req.query[:120]}'.\n"
+                            f"La clave gratuita del servidor alcanzó el límite en la consulta:\n'{req.query}'\n\n"
                             "El usuario recibió las 10 consultas DGT y el aviso para usar BYOK."
                         ),
                         priority="high",
@@ -1582,10 +1607,10 @@ async def admin_dashboard_html(request: Request):
       const rsEl = document.getElementById('recentSearches');
       rsEl.innerHTML = d.recent_searches.map(s => `
         <tr class="hover:bg-slate-950/60">
-          <td class="py-2 px-2 text-slate-400">${s.created_at.slice(11, 19)}</td>
-          <td class="py-2 px-2 text-slate-200 max-w-md truncate font-sans">${s.query}</td>
+          <td class="py-2 px-2 text-slate-400 whitespace-nowrap">${s.created_at.slice(11, 19)}</td>
+          <td class="py-2 px-2 text-slate-200 max-w-xl break-words font-sans">${s.query}</td>
           <td class="py-2 px-2 text-emerald-400">${s.dimensions}D</td>
-          <td class="py-2 px-2">${s.search_backend === 'supabase_pgvector' ? '<span class="text-blue-300">Supabase</span>' : '<span class="text-amber-300">SQLite Local</span>'}</td>
+          <td class="py-2 px-2 whitespace-nowrap">${s.search_backend === 'jetson_local_vectors' ? '<span class="text-emerald-400 font-bold">🟢 Jetson Vector</span>' : s.search_backend === 'supabase_pgvector' ? '<span class="text-blue-300">☁️ Supabase</span>' : '<span class="text-amber-300">⚡ SQLite Léxico</span>'}</td>
           <td class="py-2 px-2">${s.used_byok ? '🔑 ' : ''}${s.llm_status}</td>
           <td class="py-2 px-2 text-slate-300">${s.total_ms} ms</td>
           <td class="py-2 px-2 text-slate-500">${s.client_ip}</td>
