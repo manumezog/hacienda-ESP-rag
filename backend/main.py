@@ -3,6 +3,8 @@ import time
 import math
 import sqlite3
 import asyncio
+import smtplib
+from email.message import EmailMessage
 from collections import OrderedDict, defaultdict, deque
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,7 +14,7 @@ import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse
 from pydantic import BaseModel, Field
 
 # Cargar variables de entorno
@@ -22,6 +24,18 @@ SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_KEY", "")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
 OLLAMA_EMBED_MODEL = os.getenv("OLLAMA_EMBED_MODEL", "embeddinggemma")
+
+# Configuración de Admin Dashboard y Alertas en Tiempo Real
+ADMIN_KEY = os.getenv("ADMIN_KEY", "manuel2026").strip()
+NTFY_TOPIC = os.getenv("NTFY_TOPIC", "hacienda-rag-manuel-9f4a2b").strip()
+ALERT_EMAIL = os.getenv("ALERT_EMAIL", "manumezog@gmail.com").strip()
+SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com").strip()
+SMTP_PORT = int(os.getenv("SMTP_PORT", "465"))
+SMTP_USER = os.getenv("SMTP_USER", "manumezog@gmail.com").strip()
+SMTP_PASS = os.getenv("SMTP_PASS", "").strip()
+
+_alert_cooldowns: Dict[str, float] = {}
+ALERT_COOLDOWN_SEC = 1800.0  # 30 minutos entre alertas automáticas repetidas del mismo tipo
 
 # Resolver ruta de SQLite tanto si se ejecuta desde la raíz como desde backend/
 DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "consultas_vinculantes.db"
@@ -65,9 +79,9 @@ app = FastAPI(
         "- **Embeddings & Recorte Matryoshka (MRL):** `embeddinggemma` en NVIDIA Jetson Orin (`128D`, `256D`, `512D`, `768D`) con re-normalización L2 y caché deduplicada Side-by-Side.\n"
         "- **Índice Vectorial Cloud:** Supabase PostgreSQL (`pgvector` `halfvec(768)` con `subvector()` dinámico) + Fallback FTS/SQLite local.\n"
         "- **Hidratación Local (Cold Storage):** SQLite local de solo lectura (`?mode=ro`, 1.05 GB) en < 2 ms.\n"
-        "- **BYOK (Bring Your Own Key):** Soporta claves propias de **Google Gemini (`AIza...`)**, **OpenRouter (`sk-or-...`)** u **OpenAI (`sk-...`)**."
+        "- **BYOK (Bring Your Own Key):** Soporta claves propias de **Google Gemini (`AIza...`)**, **OpenRouter (`sk-or-...`)**, **OpenAI (`sk-...`)**, **Groq (`gsk_...`)** y **Anthropic (`sk-ant-...`)**."
     ),
-    version="1.3.0",
+    version="1.4.0",
     docs_url="/docs",
     redoc_url="/redoc",
 )
@@ -78,7 +92,7 @@ app.add_middleware(
     allow_origin_regex=r"^https://.*\.vercel\.app$",
     allow_credentials=False,
     allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization", "X-Custom-Api-Key"],
+    allow_headers=["Content-Type", "Authorization", "X-Custom-Api-Key", "X-Admin-Key"],
 )
 
 
@@ -782,6 +796,26 @@ def init_feedback_db() -> None:
                 )
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS search_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    created_at TEXT NOT NULL,
+                    query TEXT NOT NULL,
+                    dimensions INT NOT NULL,
+                    lang TEXT NOT NULL,
+                    search_backend TEXT NOT NULL,
+                    llm_status TEXT NOT NULL,
+                    used_byok INT NOT NULL DEFAULT 0,
+                    vector_ms REAL NOT NULL DEFAULT 0,
+                    hydration_ms REAL NOT NULL DEFAULT 0,
+                    llm_ms REAL NOT NULL DEFAULT 0,
+                    total_ms REAL NOT NULL DEFAULT 0,
+                    results_count INT NOT NULL DEFAULT 0,
+                    client_ip TEXT NOT NULL
+                )
+                """
+            )
             conn.commit()
         finally:
             conn.close()
@@ -790,6 +824,143 @@ def init_feedback_db() -> None:
 
 
 init_feedback_db()
+
+
+def mask_ip(ip: str) -> str:
+    if not ip or ip == "unknown":
+        return "unknown"
+    if "." in ip:
+        parts = ip.split(".")
+        if len(parts) == 4:
+            return f"{parts[0]}.{parts[1]}.{parts[2]}.***"
+    if ":" in ip:
+        parts = ip.split(":")
+        return ":".join(parts[:3]) + ":***"
+    return ip[:6] + "***"
+
+
+def _send_smtp_sync(subject: str, body: str) -> bool:
+    if not (SMTP_HOST and SMTP_USER and SMTP_PASS and ALERT_EMAIL):
+        return False
+    try:
+        msg = EmailMessage()
+        msg["Subject"] = subject
+        msg["From"] = SMTP_USER
+        msg["To"] = ALERT_EMAIL
+        msg.set_content(body)
+        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=10) as server:
+            server.login(SMTP_USER, SMTP_PASS)
+            server.send_message(msg)
+        return True
+    except Exception:
+        return False
+
+
+async def send_alert_notification(
+    title: str,
+    body: str,
+    priority: str = "default",
+    tags: str = "scales",
+    cooldown_key: Optional[str] = None,
+) -> Dict[str, bool]:
+    """
+    Envía alertas instantáneas cuando un usuario reporta un bug/comentario o cuando
+    se alcanza la cuota diaria de LLM / fallback de Supabase:
+    1) Canal Push/Web/Email instantáneo vía ntfy.sh (sin configuración previa necesaria).
+    2) Canal Email directo vía SMTP (si SMTP_PASS está configurado en backend/.env).
+    """
+    now = time.time()
+    if cooldown_key:
+        last_sent = _alert_cooldowns.get(cooldown_key, 0.0)
+        if now - last_sent < ALERT_COOLDOWN_SEC:
+            return {"ntfy": False, "smtp": False, " throttled": True}
+        _alert_cooldowns[cooldown_key] = now
+
+    ntfy_ok = False
+    smtp_ok = False
+
+    if NTFY_TOPIC:
+        try:
+            headers = {
+                "Title": title.encode("ascii", "ignore").decode("ascii") or "Hacienda-RAG Alert",
+                "Priority": priority,
+                "Tags": tags,
+            }
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                r = await client.post(
+                    f"https://ntfy.sh/{NTFY_TOPIC}",
+                    content=f"{title}\n\n{body}".encode("utf-8"),
+                    headers=headers,
+                )
+                ntfy_ok = r.status_code == 200
+        except Exception:
+            pass
+
+    if SMTP_PASS:
+        smtp_ok = await asyncio.to_thread(_send_smtp_sync, f"[Hacienda-RAG] {title}", body)
+
+    return {"ntfy": ntfy_ok, "smtp": smtp_ok}
+
+
+def log_search_event(
+    query: str,
+    dimensions: int,
+    lang: str,
+    search_backend: str,
+    llm_status: str,
+    used_byok: bool,
+    vector_ms: float,
+    hydration_ms: float,
+    llm_ms: float,
+    total_ms: float,
+    results_count: int,
+    client_ip: str,
+) -> None:
+    try:
+        conn = sqlite3.connect(str(FEEDBACK_DB_PATH))
+        try:
+            conn.execute(
+                """
+                INSERT INTO search_logs (
+                    created_at, query, dimensions, lang, search_backend, llm_status,
+                    used_byok, vector_ms, hydration_ms, llm_ms, total_ms, results_count, client_ip
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    datetime.now(timezone.utc).isoformat(),
+                    query[:500],
+                    dimensions,
+                    lang,
+                    search_backend,
+                    llm_status,
+                    1 if used_byok else 0,
+                    round(vector_ms, 2),
+                    round(hydration_ms, 2),
+                    round(llm_ms, 2),
+                    round(total_ms, 2),
+                    results_count,
+                    mask_ip(client_ip),
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        pass
+
+
+def verify_admin_key(request: Request, key_param: Optional[str] = None) -> None:
+    provided = (
+        request.headers.get("X-Admin-Key")
+        or key_param
+        or request.query_params.get("key")
+        or ""
+    ).strip()
+    if ADMIN_KEY and provided != ADMIN_KEY:
+        raise HTTPException(
+            status_code=401,
+            detail="Clave de administrador inválida (X-Admin-Key o ?key=...).",
+        )
 
 
 # =============================================================================
@@ -839,6 +1010,7 @@ async def health_check():
 async def search_consultas(req: SearchRequest, request: Request):
     has_custom_key = bool(req.custom_api_key and req.custom_api_key.strip())
     enforce_rate_limit(request, has_custom_key=has_custom_key)
+    client_ip = get_client_ip(request)
 
     t_start = time.perf_counter()
 
@@ -868,6 +1040,15 @@ async def search_consultas(req: SearchRequest, request: Request):
             _vector_search_cache[cache_tuple] = matches
             if len(_vector_search_cache) > _EMBED_CACHE_MAX:
                 _vector_search_cache.popitem(last=False)
+        asyncio.create_task(
+            send_alert_notification(
+                title="Supabase Timeout -> SQLite Fallback Activado",
+                body=f"La consulta '{req.query[:120]}' ({req.dimensions}D) usó el fallback local de SQLite en la Jetson.",
+                priority="default",
+                tags="warning,database",
+                cooldown_key="supabase_fallback",
+            )
+        )
     vector_search_ms = (time.perf_counter() - t1) * 1000
 
     # 4. Hidratación local desde SQLite (Cold Storage en modo Read-Only)
@@ -893,10 +1074,38 @@ async def search_consultas(req: SearchRequest, request: Request):
                 _llm_cache[llm_cache_key] = synthesized_answer
                 if len(_llm_cache) > _EMBED_CACHE_MAX:
                     _llm_cache.popitem(last=False)
+            elif llm_status == "quota_exceeded" and not has_custom_key:
+                asyncio.create_task(
+                    send_alert_notification(
+                        title="Cuota gratuita LLM alcanzada (429)",
+                        body=(
+                            f"La clave gratuita del servidor alcanzó el límite en la consulta: '{req.query[:120]}'.\n"
+                            "El usuario recibió las 10 consultas DGT y el aviso para usar BYOK."
+                        ),
+                        priority="high",
+                        tags="zap,key",
+                        cooldown_key="llm_quota_exceeded",
+                    )
+                )
     llm_generation_ms = (time.perf_counter() - t3) * 1000
 
     total_ms = (time.perf_counter() - t_start) * 1000
     ram_savings_pct = round((1.0 - (req.dimensions / 768.0)) * 100, 1)
+
+    log_search_event(
+        query=req.query,
+        dimensions=req.dimensions,
+        lang=req.lang,
+        search_backend=search_backend,
+        llm_status=llm_status,
+        used_byok=has_custom_key,
+        vector_ms=vector_search_ms,
+        hydration_ms=sqlite_hydration_ms,
+        llm_ms=llm_generation_ms,
+        total_ms=total_ms,
+        results_count=len(hydrated_docs),
+        client_ip=client_ip,
+    )
 
     return SearchResponse(
         query=req.query,
@@ -945,6 +1154,8 @@ async def submit_feedback(fb: FeedbackRequest, request: Request):
     init_feedback_db()
     client_ip = get_client_ip(request)
     now_iso = datetime.now(timezone.utc).isoformat()
+    clean_comment = (fb.comment or "").strip()[:1000]
+    clean_query = (fb.query or "").strip()[:500]
     try:
         conn = sqlite3.connect(str(FEEDBACK_DB_PATH))
         try:
@@ -952,10 +1163,10 @@ async def submit_feedback(fb: FeedbackRequest, request: Request):
                 "INSERT INTO feedback (rating, comment, query, lang, client_ip, created_at) VALUES (?, ?, ?, ?, ?, ?)",
                 (
                     fb.rating,
-                    (fb.comment or "").strip()[:1000],
-                    (fb.query or "").strip()[:500],
+                    clean_comment,
+                    clean_query,
                     fb.lang,
-                    client_ip,
+                    mask_ip(client_ip),
                     now_iso,
                 ),
             )
@@ -964,5 +1175,360 @@ async def submit_feedback(fb: FeedbackRequest, request: Request):
             conn.close()
     except Exception:
         pass
+
+    # Enviar alerta inmediata si es un Bug, un Dislike o incluye comentario escrito
+    if fb.rating in ("bug", "dislike") or clean_comment:
+        icon_map = {"like": "👍 LIKE", "dislike": "👎 DISLIKE", "bug": "🐛 BUG REPORT"}
+        prio = "urgent" if fb.rating == "bug" else "high"
+        tag = "rotating_light,bug" if fb.rating == "bug" else "speech_balloon"
+        asyncio.create_task(
+            send_alert_notification(
+                title=f"Nuevo Feedback: {icon_map.get(fb.rating, fb.rating)}",
+                body=(
+                    f"Tipo: {fb.rating.upper()} ({fb.lang.upper()})\n"
+                    f"Comentario: {clean_comment or '(Sin texto)'}\n"
+                    f"Consulta activa: {clean_query or '(Ninguna)'}\n"
+                    f"IP: {mask_ip(client_ip)}\n"
+                    f"Fecha UTC: {now_iso}"
+                ),
+                priority=prio,
+                tags=tag,
+            )
+        )
+
     stats = await get_feedback_stats()
     return {"status": "ok", "stats": stats}
+
+
+# =============================================================================
+# Endpoints de Administración y Observabilidad en Tiempo Real
+# =============================================================================
+
+@app.get("/api/admin/overview")
+async def admin_overview(request: Request, key: Optional[str] = None):
+    verify_admin_key(request, key)
+    init_feedback_db()
+
+    feedback_stats = await get_feedback_stats()
+    feedback_list = []
+    recent_searches = []
+    top_queries = []
+    traffic_stats = {
+        "total_requests": 0,
+        "unique_visitors": 0,
+        "byok_requests": 0,
+        "supabase_ok": 0,
+        "sqlite_fallback": 0,
+        "llm_ok": 0,
+        "llm_quota_exceeded": 0,
+        "avg_total_ms": 0.0,
+        "avg_vector_ms": 0.0,
+        "avg_hydration_ms": 0.0,
+    }
+
+    try:
+        conn = sqlite3.connect(str(FEEDBACK_DB_PATH))
+        conn.row_factory = sqlite3.Row
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT id, rating, comment, query, lang, client_ip, created_at FROM feedback ORDER BY id DESC LIMIT 100"
+            )
+            for r in cur.fetchall():
+                d = dict(r)
+                d["client_ip"] = mask_ip(d.get("client_ip", ""))
+                feedback_list.append(d)
+
+            cur.execute(
+                """
+                SELECT
+                    COUNT(*) AS total_requests,
+                    COUNT(DISTINCT client_ip) AS unique_visitors,
+                    SUM(CASE WHEN used_byok = 1 THEN 1 ELSE 0 END) AS byok_requests,
+                    SUM(CASE WHEN search_backend = 'supabase_pgvector' THEN 1 ELSE 0 END) AS supabase_ok,
+                    SUM(CASE WHEN search_backend = 'sqlite_local_fallback' THEN 1 ELSE 0 END) AS sqlite_fallback,
+                    SUM(CASE WHEN llm_status = 'ok' THEN 1 ELSE 0 END) AS llm_ok,
+                    SUM(CASE WHEN llm_status = 'quota_exceeded' THEN 1 ELSE 0 END) AS llm_quota_exceeded,
+                    ROUND(AVG(total_ms), 1) AS avg_total_ms,
+                    ROUND(AVG(vector_ms), 1) AS avg_vector_ms,
+                    ROUND(AVG(hydration_ms), 2) AS avg_hydration_ms
+                FROM search_logs
+                """
+            )
+            agg = cur.fetchone()
+            if agg and agg["total_requests"]:
+                traffic_stats = {
+                    "total_requests": agg["total_requests"] or 0,
+                    "unique_visitors": agg["unique_visitors"] or 0,
+                    "byok_requests": agg["byok_requests"] or 0,
+                    "supabase_ok": agg["supabase_ok"] or 0,
+                    "sqlite_fallback": agg["sqlite_fallback"] or 0,
+                    "llm_ok": agg["llm_ok"] or 0,
+                    "llm_quota_exceeded": agg["llm_quota_exceeded"] or 0,
+                    "avg_total_ms": agg["avg_total_ms"] or 0.0,
+                    "avg_vector_ms": agg["avg_vector_ms"] or 0.0,
+                    "avg_hydration_ms": agg["avg_hydration_ms"] or 0.0,
+                }
+
+            cur.execute(
+                """
+                SELECT id, created_at, query, dimensions, lang, search_backend,
+                       llm_status, used_byok, vector_ms, hydration_ms, llm_ms, total_ms,
+                       results_count, client_ip
+                FROM search_logs
+                ORDER BY id DESC
+                LIMIT 80
+                """
+            )
+            recent_searches = [dict(r) for r in cur.fetchall()]
+
+            cur.execute(
+                """
+                SELECT query, COUNT(*) AS count, ROUND(AVG(total_ms), 0) AS avg_ms
+                FROM search_logs
+                GROUP BY LOWER(TRIM(query))
+                ORDER BY count DESC
+                LIMIT 12
+                """
+            )
+            top_queries = [dict(r) for r in cur.fetchall()]
+        finally:
+            conn.close()
+    except Exception:
+        pass
+
+    return {
+        "feedback_stats": feedback_stats,
+        "feedback_list": feedback_list,
+        "traffic_stats": traffic_stats,
+        "recent_searches": recent_searches,
+        "top_queries": top_queries,
+        "caches": {
+            "embedding_cache_items": len(_embedding_cache),
+            "vector_cache_items": len(_vector_search_cache),
+            "llm_cache_items": len(_llm_cache),
+        },
+        "alerts": {
+            "ntfy_topic": NTFY_TOPIC,
+            "ntfy_subscribe_url": f"https://ntfy.sh/{NTFY_TOPIC}",
+            "smtp_configured": bool(SMTP_PASS),
+            "alert_email": ALERT_EMAIL,
+        },
+    }
+
+
+@app.post("/api/admin/test-alert")
+async def admin_test_alert(request: Request, key: Optional[str] = None):
+    verify_admin_key(request, key)
+    res = await send_alert_notification(
+        title="Prueba de Alerta Hacienda-ESP-RAG",
+        body="¡El sistema de alertas en tiempo real desde tu NVIDIA Jetson Orin está funcionando al 100%!",
+        priority="high",
+        tags="white_check_mark,rocket",
+    )
+    return {
+        "status": "sent",
+        "channels": res,
+        "ntfy_subscribe_url": f"https://ntfy.sh/{NTFY_TOPIC}",
+        "smtp_configured": bool(SMTP_PASS),
+    }
+
+
+@app.get("/admin", response_class=HTMLResponse, include_in_schema=False)
+async def admin_dashboard_html():
+    """
+    Dashboard ligero autocontenido servido directamente desde FastAPI en /admin
+    con auto-refresh cada 15 segundos.
+    """
+    html = """<!DOCTYPE html>
+<html lang="es" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Hacienda-RAG · Admin & Live Telemetry</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen font-sans p-4 sm:p-6">
+  <div class="max-w-7xl mx-auto space-y-6">
+    <header class="flex flex-wrap items-center justify-between gap-4 bg-slate-900/90 border border-slate-800 rounded-2xl p-4 sm:p-5">
+      <div class="flex items-center gap-3">
+        <span class="text-2xl">🪆</span>
+        <div>
+          <h1 class="text-lg sm:text-xl font-bold text-white">Hacienda-ESP-RAG · Live Admin & Feedback</h1>
+          <p class="text-xs text-slate-400">NVIDIA Jetson Orin Edge Telemetry · Auto-refresh cada 15s</p>
+        </div>
+      </div>
+      <div class="flex flex-wrap items-center gap-2">
+        <input id="adminKey" type="password" placeholder="Admin Key (manuel2026)" class="px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-xs text-white font-mono" />
+        <button onclick="loadData()" class="px-3.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold text-xs">Actualizar</button>
+        <button onclick="testAlert()" class="px-3.5 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 font-semibold text-xs">🔔 Probar Alerta</button>
+        <a id="ntfyLink" href="https://ntfy.sh/hacienda-rag-manuel-9f4a2b" target="_blank" class="px-3.5 py-1.5 rounded-lg bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 border border-blue-500/40 font-semibold text-xs">📱 Abrir Canal Push (ntfy.sh) ↗</a>
+      </div>
+    </header>
+
+    <div id="statusBanner" class="hidden px-4 py-2.5 rounded-xl border text-xs"></div>
+
+    <section class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+      <div class="bg-slate-900 border border-slate-800 rounded-xl p-3.5">
+        <span class="text-[11px] text-slate-400">👍 Likes</span>
+        <p id="mLikes" class="text-2xl font-bold text-emerald-400 mt-1">-</p>
+      </div>
+      <div class="bg-slate-900 border border-slate-800 rounded-xl p-3.5">
+        <span class="text-[11px] text-slate-400">👎 Dislikes</span>
+        <p id="mDislikes" class="text-2xl font-bold text-amber-400 mt-1">-</p>
+      </div>
+      <div class="bg-slate-900 border border-slate-800 rounded-xl p-3.5">
+        <span class="text-[11px] text-slate-400">🐛 Bugs</span>
+        <p id="mBugs" class="text-2xl font-bold text-red-400 mt-1">-</p>
+      </div>
+      <div class="bg-slate-900 border border-slate-800 rounded-xl p-3.5">
+        <span class="text-[11px] text-slate-400">🔍 Búsquedas</span>
+        <p id="mSearches" class="text-2xl font-bold text-white mt-1">-</p>
+      </div>
+      <div class="bg-slate-900 border border-slate-800 rounded-xl p-3.5">
+        <span class="text-[11px] text-slate-400">👥 IPs Únicas</span>
+        <p id="mVisitors" class="text-2xl font-bold text-blue-400 mt-1">-</p>
+      </div>
+      <div class="bg-slate-900 border border-slate-800 rounded-xl p-3.5">
+        <span class="text-[11px] text-slate-400">🔑 Usos BYOK</span>
+        <p id="mByok" class="text-2xl font-bold text-purple-400 mt-1">-</p>
+      </div>
+      <div class="bg-slate-900 border border-slate-800 rounded-xl p-3.5">
+        <span class="text-[11px] text-slate-400">⚡ Caché (Emb/Vec/LLM)</span>
+        <p id="mCache" class="text-lg font-bold text-emerald-300 mt-1 font-mono">-/-/-</p>
+      </div>
+    </section>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <section class="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 space-y-3">
+        <h2 class="text-sm font-bold text-white flex items-center justify-between">
+          <span>💬 Feedback y Reportes de Usuarios</span>
+          <span id="fbCount" class="text-xs text-slate-400 font-mono"></span>
+        </h2>
+        <div id="feedbackList" class="space-y-2.5 max-h-[460px] overflow-y-auto pr-1 text-xs"></div>
+      </section>
+
+      <section class="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 space-y-3">
+        <h2 class="text-sm font-bold text-white flex items-center justify-between">
+          <span>🔥 Consultas Fiscales Más Buscadas</span>
+          <span class="text-xs text-slate-400">Top 12</span>
+        </h2>
+        <div id="topQueries" class="space-y-2 max-h-[460px] overflow-y-auto pr-1 text-xs"></div>
+      </section>
+    </div>
+
+    <section class="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 space-y-3">
+      <h2 class="text-sm font-bold text-white">📡 Últimas Búsquedas en Tiempo Real (Log de Tráfico)</h2>
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-xs border-collapse">
+          <thead>
+            <tr class="border-b border-slate-800 text-slate-400">
+              <th class="py-2 px-2">Hora UTC</th>
+              <th class="py-2 px-2">Consulta</th>
+              <th class="py-2 px-2">Dim</th>
+              <th class="py-2 px-2">Motor</th>
+              <th class="py-2 px-2">Estado LLM</th>
+              <th class="py-2 px-2">Total ms</th>
+              <th class="py-2 px-2">IP</th>
+            </tr>
+          </thead>
+          <tbody id="recentSearches" class="divide-y divide-slate-800/60 font-mono text-[11px]"></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const keyInput = document.getElementById('adminKey');
+    keyInput.value = localStorage.getItem('hacienda_admin_key') || 'manuel2026';
+    keyInput.addEventListener('change', () => localStorage.setItem('hacienda_admin_key', keyInput.value));
+
+    function showBanner(msg, ok=true) {
+      const el = document.getElementById('statusBanner');
+      el.className = `px-4 py-2.5 rounded-xl border text-xs ${ok ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : 'bg-red-500/10 border-red-500/30 text-red-300'}`;
+      el.textContent = msg;
+      el.classList.remove('hidden');
+    }
+
+    async function testAlert() {
+      const k = keyInput.value.trim();
+      const r = await fetch(`/api/admin/test-alert?key=${encodeURIComponent(k)}`, { method: 'POST' });
+      const d = await r.json();
+      if (r.ok) {
+        showBanner(`✅ Alerta enviada! Canal Push ntfy.sh: ${d.channels.ntfy ? 'OK' : 'Error'} | Canal Email SMTP: ${d.smtp_configured ? (d.channels.smtp ? 'OK' : 'Error') : 'No configurado (usa ntfy.sh o añade SMTP_PASS en .env)'}`);
+      } else {
+        showBanner(`❌ Error: ${d.detail || 'Unauthorized'}`, false);
+      }
+    }
+
+    async function loadData() {
+      const k = keyInput.value.trim();
+      localStorage.setItem('hacienda_admin_key', k);
+      try {
+        const r = await fetch(`/api/admin/overview?key=${encodeURIComponent(k)}`);
+        const d = await r.json();
+        if (!r.ok) {
+          showBanner(`❌ ${d.detail || 'Error de autenticación'}`, false);
+          return;
+        }
+        document.getElementById('mLikes').textContent = d.feedback_stats.likes;
+        document.getElementById('mDislikes').textContent = d.feedback_stats.dislikes;
+        document.getElementById('mBugs').textContent = d.feedback_stats.bugs;
+        document.getElementById('mSearches').textContent = d.traffic_stats.total_requests;
+        document.getElementById('mVisitors').textContent = d.traffic_stats.unique_visitors;
+        document.getElementById('mByok').textContent = d.traffic_stats.byok_requests;
+        document.getElementById('mCache').textContent = `${d.caches.embedding_cache_items}/${d.caches.vector_cache_items}/${d.caches.llm_cache_items}`;
+        if (d.alerts?.ntfy_subscribe_url) {
+          document.getElementById('ntfyLink').href = d.alerts.ntfy_subscribe_url;
+        }
+
+        const fbEl = document.getElementById('feedbackList');
+        document.getElementById('fbCount').textContent = `${d.feedback_list.length} registros`;
+        fbEl.innerHTML = d.feedback_list.map(f => {
+          const badge = f.rating === 'like'
+            ? '<span class="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-bold">👍 LIKE</span>'
+            : f.rating === 'bug'
+            ? '<span class="px-2 py-0.5 rounded bg-red-500/20 text-red-300 font-bold">🐛 BUG</span>'
+            : '<span class="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold">👎 DISLIKE</span>';
+          return `<div class="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-1">
+            <div class="flex items-center justify-between gap-2">
+              ${badge}
+              <span class="text-[11px] text-slate-500 font-mono">${f.created_at.replace('T', ' ').slice(0, 19)} UTC · ${f.client_ip}</span>
+            </div>
+            ${f.comment ? `<p class="text-white font-medium pt-1">“${f.comment}”</p>` : ''}
+            ${f.query ? `<p class="text-[11px] text-slate-400">Consulta: <span class="text-slate-300">${f.query}</span></p>` : ''}
+          </div>`;
+        }).join('') || '<p class="text-slate-500">Sin registros todavía.</p>';
+
+        const tqEl = document.getElementById('topQueries');
+        tqEl.innerHTML = d.top_queries.map(q => `
+          <div class="p-2.5 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between gap-3">
+            <span class="text-slate-200 truncate">${q.query}</span>
+            <span class="px-2 py-0.5 rounded bg-slate-800 text-emerald-300 font-mono shrink-0">${q.count}x · ${q.avg_ms}ms</span>
+          </div>
+        `).join('') || '<p class="text-slate-500">Realiza una búsqueda para ver estadísticas.</p>';
+
+        const rsEl = document.getElementById('recentSearches');
+        rsEl.innerHTML = d.recent_searches.map(s => `
+          <tr class="hover:bg-slate-950/60">
+            <td class="py-2 px-2 text-slate-400">${s.created_at.slice(11, 19)}</td>
+            <td class="py-2 px-2 text-slate-200 max-w-md truncate font-sans">${s.query}</td>
+            <td class="py-2 px-2 text-emerald-400">${s.dimensions}D</td>
+            <td class="py-2 px-2">${s.search_backend === 'supabase_pgvector' ? '<span class="text-blue-300">Supabase</span>' : '<span class="text-amber-300">SQLite Local</span>'}</td>
+            <td class="py-2 px-2">${s.used_byok ? '🔑 ' : ''}${s.llm_status}</td>
+            <td class="py-2 px-2 text-slate-300">${s.total_ms} ms</td>
+            <td class="py-2 px-2 text-slate-500">${s.client_ip}</td>
+          </tr>
+        `).join('');
+      } catch (e) {
+        showBanner('Error conectando con la API.', false);
+      }
+    }
+
+    loadData();
+    setInterval(loadData, 15000);
+  </script>
+</body>
+</html>"""
+    return HTMLResponse(content=html)
+
