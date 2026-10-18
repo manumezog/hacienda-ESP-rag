@@ -166,10 +166,9 @@ En lugar de alojar el **1,05 GB** de texto en la nube, la arquitectura desacopla
 │   └── .env.example             # Environment variable template (zero secrets)
 ├── frontend/
 │   └── src/app/
-│       ├── page.tsx             # Bilingual (ES/EN) Interactive Benchmark UI, Mobile Switcher & Citation Modal
+│       ├── page.tsx             # Bilingual (ES/EN) Benchmark UI, BYOK (Gemini/OpenRouter/OpenAI), Feedback & Citation Modal
 │       ├── layout.tsx           # SEO & OpenGraph metadata
 │       └── icon.svg             # Custom vector Matryoshka favicon
-├── scraper_petete.py            # Resilient async scraper for the Spanish Ministry of Finance PETETE database
 ├── merge_db.py                  # SQLite range-merge & SHA-256 deduplication utility
 └── consultas_vinculantes.db     # [Git-ignored] Local SQLite corpus (1.05 GB, 36,053 Binding Tax Rulings 2016–2026)
 ```

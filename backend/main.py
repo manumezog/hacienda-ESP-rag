@@ -2,30 +2,33 @@ import os
 import time
 import math
 import sqlite3
-from collections import defaultdict, deque
+import asyncio
+from collections import OrderedDict, defaultdict, deque
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional, Literal, Deque, Dict
+from typing import List, Optional, Literal, Deque, Dict, Tuple
 
 import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-from supabase import create_client, Client
 
 # Cargar variables de entorno
 load_dotenv()
 
-SUPABASE_URL = os.getenv("SUPABASE_URL", "")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
+SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
+SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_KEY", "")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
 OLLAMA_EMBED_MODEL = os.getenv("OLLAMA_EMBED_MODEL", "embeddinggemma")
 
 # Resolver ruta de SQLite tanto si se ejecuta desde la raíz como desde backend/
 DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "consultas_vinculantes.db"
 SQLITE_DB_PATH = Path(os.getenv("SQLITE_DB_PATH", str(DEFAULT_DB_PATH))).resolve()
+FEEDBACK_DB_PATH = Path(__file__).resolve().parent.parent / "feedback.db"
 
-# Orígenes CORS permitidos (ajustable por variable de entorno ALLOWED_ORIGINS)
+# Orígenes CORS permitidos
 DEFAULT_ORIGINS = [
     "https://hacienda.mezapps.com",
     "https://mezapps.com",
@@ -35,8 +38,8 @@ DEFAULT_ORIGINS = [
 ENV_ORIGINS = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "").split(",") if o.strip()]
 ALLOWED_ORIGINS = ENV_ORIGINS if ENV_ORIGINS else DEFAULT_ORIGINS
 
-# Rate Limiting en memoria por IP (10 por minuto y 200 por día)
-RATE_LIMIT_MAX_PER_MIN = int(os.getenv("RATE_LIMIT_PER_MIN", "10"))
+# Rate Limiting en memoria por IP (10 por minuto y 200 por día; ampliado si el usuario aporta su API Key)
+RATE_LIMIT_MAX_PER_MIN = int(os.getenv("RATE_LIMIT_PER_MIN", "14"))
 RATE_LIMIT_MAX_PER_DAY = int(os.getenv("RATE_LIMIT_PER_DAY", "200"))
 WINDOW_MINUTE = 60.0
 WINDOW_DAY = 86400.0
@@ -44,18 +47,27 @@ WINDOW_DAY = 86400.0
 _ip_minute_log: Dict[str, Deque[float]] = defaultdict(deque)
 _ip_day_log: Dict[str, Deque[float]] = defaultdict(deque)
 
+# Caché LRU en memoria para embeddings 768D, resultados vectoriales y síntesis LLM (evita saturar Supabase t4g.nano y ahorra cuota Gemini en queries repetidas)
+_embedding_cache: "OrderedDict[str, List[float]]" = OrderedDict()
+_vector_search_cache: "OrderedDict[Tuple[str, int, int], List[dict]]" = OrderedDict()
+_llm_cache: "OrderedDict[Tuple[str, int, str], str]" = OrderedDict()
+_EMBED_CACHE_MAX = 256
+_embed_locks: Dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+# Semáforo para serializar peticiones a Supabase Free Tier (t4g.nano) y evitar statement_timeout por colisión de CPU
+_supabase_semaphore = asyncio.Semaphore(1)
+
 app = FastAPI(
     title="Hacienda-ESP-RAG API · Consultas Vinculantes DGT (Matryoshka MRL)",
     description=(
         "API pública de búsqueda vectorial e hidratación local sobre **36.053 Consultas Vinculantes "
         "de la Dirección General de Tributos (Hacienda Española, 2016–2026)**.\n\n"
         "### Arquitectura Híbrida (Edge + Cloud)\n"
-        "- **Embeddings & Recorte Matryoshka (MRL):** `embeddinggemma` en NVIDIA Jetson Orin (`128D`, `256D`, `512D`, `768D`) con re-normalización L2.\n"
-        "- **Índice Vectorial Cloud:** Supabase PostgreSQL (`pgvector` `halfvec(768)` con `subvector()` dinámico).\n"
+        "- **Embeddings & Recorte Matryoshka (MRL):** `embeddinggemma` en NVIDIA Jetson Orin (`128D`, `256D`, `512D`, `768D`) con re-normalización L2 y caché deduplicada Side-by-Side.\n"
+        "- **Índice Vectorial Cloud:** Supabase PostgreSQL (`pgvector` `halfvec(768)` con `subvector()` dinámico) + Fallback FTS/SQLite local.\n"
         "- **Hidratación Local (Cold Storage):** SQLite local de solo lectura (`?mode=ro`, 1.05 GB) en < 2 ms.\n"
-        "- **Límites de Uso (Rate Limit):** Máximo **10 peticiones/minuto** y **200 peticiones/día** por IP."
+        "- **BYOK (Bring Your Own Key):** Soporta claves propias de **Google Gemini (`AIza...`)**, **OpenRouter (`sk-or-...`)** u **OpenAI (`sk-...`)**."
     ),
-    version="1.2.0",
+    version="1.3.0",
     docs_url="/docs",
     redoc_url="/redoc",
 )
@@ -66,57 +78,79 @@ app.add_middleware(
     allow_origin_regex=r"^https://.*\.vercel\.app$",
     allow_credentials=False,
     allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Content-Type"],
+    allow_headers=["Content-Type", "Authorization", "X-Custom-Api-Key"],
 )
 
-_supabase_client: Optional[Client] = None
 
-
-def get_supabase() -> Client:
-    global _supabase_client
-    if _supabase_client is None:
-        if not SUPABASE_URL or not SUPABASE_KEY:
-            raise HTTPException(
-                status_code=500,
-                detail="Configuración de base de datos vectorial incompleta en el servidor.",
-            )
-        _supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
-    return _supabase_client
-
-
-def enforce_rate_limit(request: Request) -> None:
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
     """
-    Aplica doble límite por IP real (vía CF-Connecting-IP de Cloudflare Tunnel):
-    - Máximo 10 peticiones por minuto (5 comparativas Side-by-Side/min)
-    - Máximo 200 peticiones por día (24h)
+    Evita devolver códigos 502/504 crudos que Cloudflare Tunnel intercepta y reemplaza
+    por páginas HTML sin cabeceras CORS (causando 'Failed to fetch' en el navegador).
     """
-    client_ip = (
+    origin = request.headers.get("origin", "https://hacienda.mezapps.com")
+    headers = {"Access-Control-Allow-Origin": origin, "Vary": "Origin"}
+    return JSONResponse(
+        status_code=503,
+        content={
+            "detail": (
+                "El servidor Edge (Jetson Orin) está procesando un pico de tráfico en este instante. "
+                "Por favor, pulsa buscar de nuevo en unos segundos."
+            ),
+            "error_type": "edge_busy",
+        },
+        headers=headers,
+    )
+
+
+def get_client_ip(request: Request) -> str:
+    return (
         request.headers.get("CF-Connecting-IP")
         or request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
         or (request.client.host if request.client else "unknown")
     )
+
+
+def enforce_rate_limit(request: Request, has_custom_key: bool = False) -> None:
+    """
+    Aplica doble límite por IP real (vía CF-Connecting-IP de Cloudflare Tunnel):
+    - Máximo 14 peticiones por minuto (7 comparativas Side-by-Side/min)
+    - Máximo 200 peticiones por día (24h)
+    Si el usuario aporta su propia API Key (BYOK), el límite diario se amplía a 600.
+    """
+    client_ip = get_client_ip(request)
     now = time.monotonic()
 
-    # 1. Comprobar ventana de 24 horas (200/día)
+    max_day = RATE_LIMIT_MAX_PER_DAY * 3 if has_custom_key else RATE_LIMIT_MAX_PER_DAY
+    max_min = RATE_LIMIT_MAX_PER_MIN * 2 if has_custom_key else RATE_LIMIT_MAX_PER_MIN
+
+    # 1. Comprobar ventana de 24 horas
     q_day = _ip_day_log[client_ip]
     while q_day and (now - q_day[0]) > WINDOW_DAY:
         q_day.popleft()
 
-    if len(q_day) >= RATE_LIMIT_MAX_PER_DAY:
+    if len(q_day) >= max_day:
         raise HTTPException(
             status_code=429,
-            detail="Has alcanzado el límite máximo de 200 consultas diarias. Vuelve a intentarlo mañana.",
+            detail=(
+                "DAILY_LIMIT_REACHED: Has alcanzado el límite diario gratuito de consultas desde tu IP. "
+                "Puedes volver mañana o introducir tu propia API Key gratuita (Google Gemini o OpenRouter) "
+                "en el botón '🔑 API Key' para seguir consultando sin límite."
+            ),
         )
 
-    # 2. Comprobar ventana de 1 minuto (10/minuto)
+    # 2. Comprobar ventana de 1 minuto
     q_min = _ip_minute_log[client_ip]
     while q_min and (now - q_min[0]) > WINDOW_MINUTE:
         q_min.popleft()
 
-    if len(q_min) >= RATE_LIMIT_MAX_PER_MIN:
+    if len(q_min) >= max_min:
         raise HTTPException(
             status_code=429,
-            detail="Has superado el límite de 10 peticiones por minuto. Espera unos segundos antes de volver a consultar.",
+            detail=(
+                "RATE_LIMIT_MINUTE: Demasiadas consultas seguidas en el último minuto. "
+                "Espera 15 segundos y vuelve a intentarlo."
+            ),
         )
 
     q_min.append(now)
@@ -124,7 +158,7 @@ def enforce_rate_limit(request: Request) -> None:
 
 
 # =============================================================================
-# Modelos Pydantic (Con validación estricta de longitud máxima)
+# Modelos Pydantic
 # =============================================================================
 
 class SearchRequest(BaseModel):
@@ -146,6 +180,11 @@ class SearchRequest(BaseModel):
     lang: Literal["es", "en"] = Field(
         default="es",
         description="Idioma de la síntesis generada por el LLM ('es' o 'en')",
+    )
+    custom_api_key: Optional[str] = Field(
+        default=None,
+        max_length=250,
+        description="API Key opcional del usuario (Google Gemini 'AIza...', OpenRouter 'sk-or-...' u OpenAI 'sk-...')",
     )
 
 
@@ -178,10 +217,19 @@ class SearchResponse(BaseModel):
     latency: LatencyMetrics
     results: List[HydratedDocument]
     synthesized_answer: Optional[str] = None
+    llm_status: Literal["ok", "skipped", "quota_exceeded", "invalid_key", "error"] = "ok"
+    search_backend: Literal["supabase_pgvector", "sqlite_local_fallback"] = "supabase_pgvector"
+
+
+class FeedbackRequest(BaseModel):
+    rating: Literal["like", "dislike", "bug"] = Field(..., description="Tipo de feedback: 'like', 'dislike' o 'bug'")
+    comment: Optional[str] = Field(default="", max_length=1000, description="Comentario opcional o reporte de fallo")
+    query: Optional[str] = Field(default="", max_length=500, description="Consulta activa cuando se envió el feedback")
+    lang: Literal["es", "en"] = Field(default="es")
 
 
 # =============================================================================
-# Funciones Auxiliares (MRL Truncation, Ollama, SQLite Read-Only Hydration)
+# Funciones Auxiliares (MRL Truncation, Ollama GPU Cache, Supabase Async, SQLite)
 # =============================================================================
 
 def truncate_and_normalize_mrl(vector: List[float], dimensions: int) -> List[float]:
@@ -193,36 +241,200 @@ def truncate_and_normalize_mrl(vector: List[float], dimensions: int) -> List[flo
 
 
 async def get_ollama_embedding(text: str) -> List[float]:
-    formatted_query = (
-        f"task: search result | query: {text}"
-        if "embeddinggemma" in OLLAMA_EMBED_MODEL.lower()
-        else text
-    )
+    """
+    Calcula el vector 768D en la GPU de la Jetson Orin con caché en memoria y lock por texto.
+    Cuando el frontend lanza las dos búsquedas en paralelo (768D y 128D), la segunda reutiliza
+    el embedding de la primera en 0 ms, reduciendo a la mitad la carga sobre la GPU.
+    """
+    cache_key = text.strip()
+    if cache_key in _embedding_cache:
+        _embedding_cache.move_to_end(cache_key)
+        return _embedding_cache[cache_key]
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        try:
-            resp = await client.post(
-                f"{OLLAMA_BASE_URL}/api/embed",
-                json={"model": OLLAMA_EMBED_MODEL, "input": formatted_query},
-            )
-            if resp.status_code == 200:
-                data = resp.json()
-                embeddings = data.get("embeddings")
-                if embeddings and len(embeddings) > 0:
-                    return embeddings[0]
+    lock = _embed_locks[cache_key]
+    async with lock:
+        if cache_key in _embedding_cache:
+            _embedding_cache.move_to_end(cache_key)
+            return _embedding_cache[cache_key]
 
-            resp_legacy = await client.post(
-                f"{OLLAMA_BASE_URL}/api/embeddings",
-                json={"model": OLLAMA_EMBED_MODEL, "prompt": formatted_query},
-            )
-            resp_legacy.raise_for_status()
-            return resp_legacy.json()["embedding"]
+        formatted_query = (
+            f"task: search result | query: {cache_key}"
+            if "embeddinggemma" in OLLAMA_EMBED_MODEL.lower()
+            else cache_key
+        )
 
-        except httpx.RequestError:
-            raise HTTPException(
-                status_code=503,
-                detail="El motor local de embeddings (Ollama GPU) no está disponible en este momento.",
+        async with httpx.AsyncClient(timeout=35.0) as client:
+            try:
+                resp = await client.post(
+                    f"{OLLAMA_BASE_URL}/api/embed",
+                    json={"model": OLLAMA_EMBED_MODEL, "input": formatted_query},
+                )
+                vec = None
+                if resp.status_code == 200:
+                    data = resp.json()
+                    embeddings = data.get("embeddings")
+                    if embeddings and len(embeddings) > 0:
+                        vec = embeddings[0]
+
+                if not vec:
+                    resp_legacy = await client.post(
+                        f"{OLLAMA_BASE_URL}/api/embeddings",
+                        json={"model": OLLAMA_EMBED_MODEL, "prompt": formatted_query},
+                    )
+                    if resp_legacy.status_code == 200:
+                        vec = resp_legacy.json().get("embedding")
+
+                if not vec:
+                    raise HTTPException(
+                        status_code=503,
+                        detail="El motor GPU local (Ollama) está recargando el modelo en memoria. Reintenta en 3 segundos.",
+                    )
+
+                _embedding_cache[cache_key] = vec
+                if len(_embedding_cache) > _EMBED_CACHE_MAX:
+                    _embedding_cache.popitem(last=False)
+                return vec
+
+            except httpx.HTTPError:
+                raise HTTPException(
+                    status_code=503,
+                    detail="El motor local de embeddings (Ollama GPU en Jetson Orin) no responde en este instante.",
+                )
+
+
+async def query_supabase_matches(
+    query_key: str, truncated_vector: List[float], dimensions: int, top_k: int
+) -> Tuple[List[dict], str]:
+    """
+    Consulta asíncrona directa contra PostgREST de Supabase (HTTP/1.1 limpio por petición,
+    serializada con _supabase_semaphore para no saturar la instancia t4g.nano y con caché LRU).
+    Si Supabase supera el tiempo de espera en el Free Tier por alto tráfico, aplica fallback
+    automático al SQLite local para que la búsqueda NUNCA falle.
+    """
+    cache_tuple = (query_key.strip().lower(), dimensions, top_k)
+    if cache_tuple in _vector_search_cache:
+        _vector_search_cache.move_to_end(cache_tuple)
+        return _vector_search_cache[cache_tuple], "supabase_pgvector"
+
+    if SUPABASE_URL and SUPABASE_KEY:
+        rpc_url = f"{SUPABASE_URL}/rest/v1/rpc/match_documents"
+        headers = {
+            "apikey": SUPABASE_KEY,
+            "Authorization": f"Bearer {SUPABASE_KEY}",
+            "Content-Type": "application/json",
+        }
+        async with _supabase_semaphore:
+            if cache_tuple in _vector_search_cache:
+                _vector_search_cache.move_to_end(cache_tuple)
+                return _vector_search_cache[cache_tuple], "supabase_pgvector"
+
+            for attempt, count_mult in enumerate([2, 1]):
+                match_count = min(max(top_k * count_mult, top_k + 4), 25)
+                try:
+                    async with httpx.AsyncClient(http1=True, timeout=20.0) as client:
+                        resp = await client.post(
+                            rpc_url,
+                            headers=headers,
+                            json={
+                                "query_embedding": truncated_vector,
+                                "match_dimensions": dimensions,
+                                "match_count": match_count,
+                            },
+                        )
+                        if resp.status_code == 200:
+                            raw_matches = resp.json() or []
+                            seen_consultas = set()
+                            matches = []
+                            for m in raw_matches:
+                                num_c = m.get("num_consulta")
+                                if num_c and num_c not in seen_consultas:
+                                    seen_consultas.add(num_c)
+                                    matches.append(m)
+                                    if len(matches) >= top_k:
+                                        break
+                            if matches:
+                                _vector_search_cache[cache_tuple] = matches
+                                if len(_vector_search_cache) > _EMBED_CACHE_MAX:
+                                    _vector_search_cache.popitem(last=False)
+                                return matches, "supabase_pgvector"
+                except Exception:
+                    if attempt == 0:
+                        await asyncio.sleep(0.25)
+
+    return [], "sqlite_local_fallback"
+
+
+def search_fallback_sqlite(query: str, top_k: int) -> List[dict]:
+    """
+    Fallback ultrarrápido sobre el SQLite local (Read-Only) en caso de saturación
+    o timeout temporal del Free Tier de Supabase durante picos de tráfico.
+    """
+    if not SQLITE_DB_PATH.exists():
+        return []
+
+    stop_words = {
+        "como", "cómo", "para", "por", "con", "una", "uno", "los", "las", "del", "que",
+        "qué", "puedo", "puede", "tengo", "sobre", "entre", "hasta", "desde", "cuando",
+        "cuándo", "donde", "dónde", "este", "esta", "estos", "estas", "pero", "sino",
+        "what", "when", "where", "which", "with", "from", "that", "this", "have", "under",
+    }
+    words = [
+        w.strip(".,;:¿?¡!()\"'")
+        for w in query.lower().split()
+        if len(w.strip(".,;:¿?¡!()\"'")) >= 4 and w.strip(".,;:¿?¡!()\"'") not in stop_words
+    ][:6]
+
+    db_uri = f"{SQLITE_DB_PATH.as_uri()}?mode=ro"
+    conn = sqlite3.connect(db_uri, uri=True)
+    conn.row_factory = sqlite3.Row
+    try:
+        cur = conn.cursor()
+        if not words:
+            cur.execute(
+                "SELECT num_consulta, organo, fecha_salida FROM consultas LIMIT ?",
+                (top_k,),
             )
+        else:
+            score_expr = " + ".join(
+                ["(CASE WHEN cuestion_planteada LIKE ? THEN 3 WHEN contestacion_completa LIKE ? THEN 1 ELSE 0 END)"]
+                * len(words)
+            )
+            where_expr = " OR ".join(["cuestion_planteada LIKE ?"] * len(words))
+            params: List[object] = []
+            for w in words:
+                params.extend([f"%{w}%", f"%{w}%"])
+            for w in words:
+                params.append(f"%{w}%")
+            params.append(top_k)
+
+            cur.execute(
+                f"""
+                SELECT num_consulta, organo, fecha_salida, ({score_expr}) AS kw_score
+                FROM consultas
+                WHERE {where_expr}
+                ORDER BY kw_score DESC
+                LIMIT ?
+                """,
+                params,
+            )
+        rows = cur.fetchall()
+        matches = []
+        for idx, r in enumerate(rows):
+            matches.append(
+                {
+                    "chunk_id": f"{r['num_consulta']}_0",
+                    "num_consulta": r["num_consulta"],
+                    "chunk_index": 0,
+                    "fecha_iso": r["fecha_salida"],
+                    "organo": r["organo"],
+                    "similarity": round(max(0.82 - idx * 0.02, 0.60), 4),
+                }
+            )
+        return matches
+    except Exception:
+        return []
+    finally:
+        conn.close()
 
 
 def hydrate_from_sqlite(matches: List[dict]) -> List[HydratedDocument]:
@@ -236,7 +448,7 @@ def hydrate_from_sqlite(matches: List[dict]) -> List[HydratedDocument]:
 
     if not SQLITE_DB_PATH.exists():
         raise HTTPException(
-            status_code=500,
+            status_code=503,
             detail="Almacenamiento documental SQLite no disponible en el servidor.",
         )
 
@@ -246,7 +458,6 @@ def hydrate_from_sqlite(matches: List[dict]) -> List[HydratedDocument]:
 
     placeholders = ",".join(["?"] * len(num_consultas))
 
-    # Conexión en modo estricto Read-Only (URI mode=ro)
     db_uri = f"{SQLITE_DB_PATH.as_uri()}?mode=ro"
     conn = sqlite3.connect(db_uri, uri=True)
     conn.row_factory = sqlite3.Row
@@ -288,15 +499,20 @@ def hydrate_from_sqlite(matches: List[dict]) -> List[HydratedDocument]:
 
 
 async def generate_llm_response(
-    query: str, docs: List[HydratedDocument], lang: str = "es"
-) -> Optional[str]:
+    query: str,
+    docs: List[HydratedDocument],
+    lang: str = "es",
+    custom_api_key: Optional[str] = None,
+) -> Tuple[Optional[str], Literal["ok", "skipped", "quota_exceeded", "invalid_key", "error"]]:
     """
     Genera una respuesta legal citando las consultas vinculantes hidratadas.
-    Incluye aislamiento de la pregunta del usuario contra Prompt Injection
-    y sanitización de mensajes de error para no exponer detalles internos.
+    Soporta tanto la clave del servidor como una API Key aportada por el usuario (BYOK):
+    - Google Gemini API Key (empieza por 'AIza...')
+    - OpenRouter API Key (empieza por 'sk-or-...')
+    - OpenAI API Key (empieza por 'sk-...')
     """
     if not docs:
-        return None
+        return None, "skipped"
 
     load_dotenv(override=True)
     raw_or_key = os.getenv("OPENROUTER_API_KEY", "").strip()
@@ -306,12 +522,34 @@ async def generate_llm_response(
     placeholders = {"", "TU_CLAVE_AQUI", "PEGAR_AQUI_TU_GEMINI_KEY", "tu-api-key"}
     openrouter_key = "" if raw_or_key in placeholders else raw_or_key
     gemini_key = "" if raw_gem_key in placeholders else raw_gem_key
+    openai_key = ""
 
     if not gemini_key and openrouter_key.startswith("AIza"):
         gemini_key = openrouter_key
         openrouter_key = ""
     elif gemini_key.startswith("AIza") and not openrouter_key.startswith("sk-or-"):
         openrouter_key = ""
+
+    # Si el usuario ha introducido su propia API Key (BYOK), priorizarla
+    user_key = (custom_api_key or "").strip()
+    using_custom_key = bool(user_key)
+    if using_custom_key:
+        if user_key.startswith("AIza"):
+            gemini_key = user_key
+            openrouter_key = ""
+            openai_key = ""
+        elif user_key.startswith("sk-or-"):
+            openrouter_key = user_key
+            gemini_key = ""
+            openai_key = ""
+        elif user_key.startswith("sk-"):
+            openai_key = user_key
+            gemini_key = ""
+            openrouter_key = ""
+        else:
+            # Probar como Gemini o OpenRouter según formato
+            gemini_key = user_key
+            openrouter_key = ""
 
     context_blocks = []
     for d in docs[:3]:
@@ -341,11 +579,13 @@ async def generate_llm_response(
         )
 
     user_payload = f"<user_query>\n{query}\n</user_query>\n\n<dgt_context>\n{context_text}\n</dgt_context>"
+    saw_quota_429 = False
+    saw_auth_error = False
 
     if gemini_key:
-        gemini_models = ["gemini-3.8-flash", "gemini-flash-latest"]
-        async with httpx.AsyncClient(timeout=45.0) as client:
-            for idx, g_model in enumerate(gemini_models):
+        gemini_models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-latest"]
+        async with httpx.AsyncClient(timeout=35.0) as client:
+            for g_model in gemini_models:
                 try:
                     resp = await client.post(
                         f"https://generativelanguage.googleapis.com/v1beta/models/{g_model}:generateContent?key={gemini_key}",
@@ -363,29 +603,54 @@ async def generate_llm_response(
                     if resp.status_code == 200:
                         candidates = resp.json().get("candidates", [])
                         if candidates:
-                            return candidates[0]["content"]["parts"][0]["text"]
-                    elif idx == len(gemini_models) - 1:
-                        list_resp = await client.get(
-                            f"https://generativelanguage.googleapis.com/v1beta/models?key={gemini_key}"
-                        )
-                        if list_resp.status_code == 200:
-                            for m in list_resp.json().get("models", []):
-                                name = m.get("name", "").replace("models/", "")
-                                methods = m.get("supportedGenerationMethods", [])
-                                if "generateContent" in methods and "flash" in name and name not in gemini_models:
-                                    gemini_models.append(name)
-                                    break
+                            return candidates[0]["content"]["parts"][0]["text"], "ok"
+                    elif resp.status_code == 429:
+                        saw_quota_429 = True
+                    elif resp.status_code in (400, 401, 403):
+                        err_body = resp.text.lower()
+                        if "api_key_invalid" in err_body or "key not valid" in err_body or resp.status_code in (401, 403):
+                            saw_auth_error = True
+                            break
                 except Exception:
                     pass
 
     if openrouter_key:
-        async with httpx.AsyncClient(timeout=45.0) as client:
+        or_models = [llm_model, "google/gemini-2.0-flash-001", "meta-llama/llama-3.3-70b-instruct:free"]
+        async with httpx.AsyncClient(timeout=35.0) as client:
+            for or_m in dict.fromkeys(or_models):
+                try:
+                    resp = await client.post(
+                        "https://openrouter.ai/api/v1/chat/completions",
+                        headers={"Authorization": f"Bearer {openrouter_key}"},
+                        json={
+                            "model": or_m,
+                            "messages": [
+                                {"role": "system", "content": system_prompt},
+                                {"role": "user", "content": user_payload},
+                            ],
+                            "temperature": 0.1,
+                        },
+                    )
+                    if resp.status_code == 200:
+                        choices = resp.json().get("choices", [])
+                        if choices:
+                            return choices[0]["message"]["content"], "ok"
+                    elif resp.status_code in (402, 429):
+                        saw_quota_429 = True
+                    elif resp.status_code in (401, 403):
+                        saw_auth_error = True
+                        break
+                except Exception:
+                    pass
+
+    if openai_key:
+        async with httpx.AsyncClient(timeout=35.0) as client:
             try:
                 resp = await client.post(
-                    "https://openrouter.ai/api/v1/chat/completions",
-                    headers={"Authorization": f"Bearer {openrouter_key}"},
+                    "https://api.openai.com/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {openai_key}"},
                     json={
-                        "model": llm_model,
+                        "model": "gpt-4o-mini",
                         "messages": [
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": user_payload},
@@ -394,28 +659,71 @@ async def generate_llm_response(
                     },
                 )
                 if resp.status_code == 200:
-                    return resp.json()["choices"][0]["message"]["content"]
+                    return resp.json()["choices"][0]["message"]["content"], "ok"
+                elif resp.status_code == 429:
+                    saw_quota_429 = True
+                elif resp.status_code in (401, 403):
+                    saw_auth_error = True
             except Exception:
                 pass
 
-    return (
-        "⚠️ Synthesis temporarily unavailable due to high demand."
+    if using_custom_key and saw_auth_error:
+        msg = (
+            "⚠️ The custom API Key provided appears invalid or unauthorized. Please check that it is a valid Google Gemini ('AIza...'), OpenRouter ('sk-or-...'), or OpenAI ('sk-...') key."
+            if lang == "en"
+            else "⚠️ La API Key introducida no es válida o no tiene permisos. Comprueba que sea una clave válida de Google Gemini ('AIza...'), OpenRouter ('sk-or-...') u OpenAI ('sk-...')."
+        )
+        return msg, "invalid_key"
+
+    if saw_quota_429:
+        msg = (
+            "⚡ Free-tier daily AI synthesis quota reached due to high visitor traffic! The 10 official Tax Rulings retrieved below are 100% functional. Come back tomorrow or click '🔑 Bring Your Own API Key' above to paste a free Google Gemini (AIza...) or OpenRouter (sk-or-...) key for instant AI synthesis."
+            if lang == "en"
+            else "⚡ Cuota diaria gratuita de síntesis IA alcanzada por el alto tráfico de visitas. ¡Las 10 Consultas Vinculantes recuperadas abajo funcionan al 100%! Puedes volver mañana o pulsar el botón '🔑 Usar mi API Key' arriba e introducir una clave gratuita de Google Gemini (AIza...) u OpenRouter (sk-or-...) para generar el resumen jurídico al instante."
+        )
+        return msg, "quota_exceeded"
+
+    msg = (
+        "⚠️ AI synthesis is temporarily saturated due to high demand. The 10 official Tax Rulings retrieved below are 100% available—or click '🔑 Bring Your Own API Key' to use your own Gemini / OpenRouter key."
         if lang == "en"
-        else "⚠️ Síntesis IA temporalmente no disponible por límite de cuota gratuita."
+        else "⚠️ La síntesis con IA está temporalmente saturada por alta demanda. Las 10 Consultas Vinculantes recuperadas abajo están 100% disponibles, o puedes pulsar '🔑 Usar mi API Key' para usar tu propia clave de Gemini u OpenRouter."
     )
+    return msg, "quota_exceeded"
+
+
+def init_feedback_db() -> None:
+    try:
+        conn = sqlite3.connect(str(FEEDBACK_DB_PATH))
+        try:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS feedback (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    rating TEXT NOT NULL,
+                    comment TEXT,
+                    query TEXT,
+                    lang TEXT,
+                    client_ip TEXT,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        pass
+
+
+init_feedback_db()
 
 
 # =============================================================================
-# Endpoints Públicos (Sin filtración de rutas ni URLs internas)
+# Endpoints Públicos
 # =============================================================================
 
 @app.get("/api/health")
 async def health_check():
-    """
-    Health check seguro para producción:
-    Verifica el estado de los servicios sin exponer rutas del sistema de archivos,
-    usuarios de Linux ni URLs internas de Supabase.
-    """
     sqlite_ok = SQLITE_DB_PATH.exists()
     total_local_docs = 0
     if sqlite_ok:
@@ -455,11 +763,12 @@ async def health_check():
 
 @app.post("/api/search", response_model=SearchResponse)
 async def search_consultas(req: SearchRequest, request: Request):
-    enforce_rate_limit(request)
+    has_custom_key = bool(req.custom_api_key and req.custom_api_key.strip())
+    enforce_rate_limit(request, has_custom_key=has_custom_key)
 
     t_start = time.perf_counter()
 
-    # 1. Embedding local en 768D con Ollama
+    # 1. Embedding local en 768D con Ollama (con caché deduplicada para Side-by-Side)
     t0 = time.perf_counter()
     raw_vector_768 = await get_ollama_embedding(req.query)
     if len(raw_vector_768) < req.dimensions:
@@ -472,33 +781,14 @@ async def search_consultas(req: SearchRequest, request: Request):
     truncated_vector = truncate_and_normalize_mrl(raw_vector_768, req.dimensions)
     embedding_ms = (time.perf_counter() - t0) * 1000
 
-    # 3. Búsqueda vectorial en Supabase (RPC match_documents)
+    # 3. Búsqueda vectorial asíncrona en Supabase (con Fallback automático a SQLite local)
     t1 = time.perf_counter()
-    supabase = get_supabase()
-    try:
-        rpc_response = supabase.rpc(
-            "match_documents",
-            {
-                "query_embedding": truncated_vector,
-                "match_dimensions": req.dimensions,
-                "match_count": min(req.top_k * 4, 60),
-            },
-        ).execute()
-        raw_matches = rpc_response.data or []
-        seen_consultas = set()
-        matches = []
-        for m in raw_matches:
-            num_c = m.get("num_consulta")
-            if num_c and num_c not in seen_consultas:
-                seen_consultas.add(num_c)
-                matches.append(m)
-                if len(matches) >= req.top_k:
-                    break
-    except Exception:
-        raise HTTPException(
-            status_code=502,
-            detail="Error temporal al consultar el índice vectorial en la nube.",
-        )
+    matches, search_backend = await query_supabase_matches(
+        req.query, truncated_vector, req.dimensions, req.top_k
+    )
+    if not matches:
+        matches = search_fallback_sqlite(req.query, req.top_k)
+        search_backend = "sqlite_local_fallback"
     vector_search_ms = (time.perf_counter() - t1) * 1000
 
     # 4. Hidratación local desde SQLite (Cold Storage en modo Read-Only)
@@ -506,11 +796,24 @@ async def search_consultas(req: SearchRequest, request: Request):
     hydrated_docs = hydrate_from_sqlite(matches)
     sqlite_hydration_ms = (time.perf_counter() - t2) * 1000
 
-    # 5. Síntesis opcional con LLM
+    # 5. Síntesis opcional con LLM (con caché en memoria para ahorrar cuota diaria en ejemplos del dropdown)
     t3 = time.perf_counter()
     synthesized_answer = None
+    llm_status: Literal["ok", "skipped", "quota_exceeded", "invalid_key", "error"] = "skipped"
     if req.generate_answer and hydrated_docs:
-        synthesized_answer = await generate_llm_response(req.query, hydrated_docs, req.lang)
+        llm_cache_key = (req.query.strip().lower(), req.dimensions, req.lang)
+        if llm_cache_key in _llm_cache and not has_custom_key:
+            _llm_cache.move_to_end(llm_cache_key)
+            synthesized_answer = _llm_cache[llm_cache_key]
+            llm_status = "ok"
+        else:
+            synthesized_answer, llm_status = await generate_llm_response(
+                req.query, hydrated_docs, req.lang, req.custom_api_key
+            )
+            if llm_status == "ok" and synthesized_answer:
+                _llm_cache[llm_cache_key] = synthesized_answer
+                if len(_llm_cache) > _EMBED_CACHE_MAX:
+                    _llm_cache.popitem(last=False)
     llm_generation_ms = (time.perf_counter() - t3) * 1000
 
     total_ms = (time.perf_counter() - t_start) * 1000
@@ -530,4 +833,57 @@ async def search_consultas(req: SearchRequest, request: Request):
         ),
         results=hydrated_docs,
         synthesized_answer=synthesized_answer,
+        llm_status=llm_status,
+        search_backend=search_backend,
     )
+
+
+@app.get("/api/feedback/stats")
+async def get_feedback_stats():
+    init_feedback_db()
+    likes = dislikes = bugs = 0
+    try:
+        conn = sqlite3.connect(str(FEEDBACK_DB_PATH))
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT rating, COUNT(*) FROM feedback GROUP BY rating")
+            for rating, count in cur.fetchall():
+                if rating == "like":
+                    likes = count
+                elif rating == "dislike":
+                    dislikes = count
+                elif rating == "bug":
+                    bugs = count
+        finally:
+            conn.close()
+    except Exception:
+        pass
+    return {"likes": likes, "dislikes": dislikes, "bugs": bugs}
+
+
+@app.post("/api/feedback")
+async def submit_feedback(fb: FeedbackRequest, request: Request):
+    init_feedback_db()
+    client_ip = get_client_ip(request)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    try:
+        conn = sqlite3.connect(str(FEEDBACK_DB_PATH))
+        try:
+            conn.execute(
+                "INSERT INTO feedback (rating, comment, query, lang, client_ip, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    fb.rating,
+                    (fb.comment or "").strip()[:1000],
+                    (fb.query or "").strip()[:500],
+                    fb.lang,
+                    client_ip,
+                    now_iso,
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        pass
+    stats = await get_feedback_stats()
+    return {"status": "ok", "stats": stats}

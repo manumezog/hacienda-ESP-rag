@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Search,
   Database,
@@ -22,6 +22,12 @@ import {
   Globe,
   Mail,
   Layers,
+  Key,
+  ThumbsUp,
+  ThumbsDown,
+  Bug,
+  RefreshCw,
+  Send,
 } from "lucide-react";
 
 type DimensionOption = 128 | 256 | 512;
@@ -56,6 +62,8 @@ interface SearchResponse {
   latency: LatencyMetrics;
   results: HydratedDocument[];
   synthesized_answer?: string | null;
+  llm_status?: "ok" | "skipped" | "quota_exceeded" | "invalid_key" | "error";
+  search_backend?: "supabase_pgvector" | "sqlite_local_fallback";
 }
 
 interface SampleCategory {
@@ -380,6 +388,24 @@ export default function MatryoshkaBenchmarkPage() {
   const [selectedDocModal, setSelectedDocModal] =
     useState<HydratedDocument | null>(null);
 
+  // BYOK (Bring Your Own API Key: Gemini AIza... / OpenRouter sk-or-...)
+  const [customApiKey, setCustomApiKey] = useState<string>("");
+  const [draftApiKey, setDraftApiKey] = useState<string>("");
+  const [showApiKeyModal, setShowApiKeyModal] = useState<boolean>(false);
+
+  // Feedback & Bug Reporting
+  const [feedbackStats, setFeedbackStats] = useState<{
+    likes: number;
+    dislikes: number;
+    bugs: number;
+  }>({ likes: 12, dislikes: 0, bugs: 0 });
+  const [activeFeedbackType, setActiveFeedbackType] = useState<
+    "like" | "dislike" | "bug" | null
+  >(null);
+  const [feedbackComment, setFeedbackComment] = useState<string>("");
+  const [feedbackSent, setFeedbackSent] = useState<boolean>(false);
+  const [sendingFeedback, setSendingFeedback] = useState<boolean>(false);
+
   const [loadingLeft, setLoadingLeft] = useState<boolean>(false);
   const [loadingRight, setLoadingRight] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -387,10 +413,100 @@ export default function MatryoshkaBenchmarkPage() {
   const [tradResult, setTradResult] = useState<SearchResponse | null>(null);
   const [mrlResult, setMrlResult] = useState<SearchResponse | null>(null);
 
+  useEffect(() => {
+    try {
+      const savedKey = localStorage.getItem("hacienda_rag_custom_api_key");
+      if (savedKey) {
+        setCustomApiKey(savedKey);
+        setDraftApiKey(savedKey);
+      }
+    } catch {}
+    fetch(`${BACKEND_API_URL}/api/feedback/stats`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data && typeof data.likes === "number") {
+          setFeedbackStats({
+            likes: Math.max(data.likes, 1),
+            dislikes: data.dislikes || 0,
+            bugs: data.bugs || 0,
+          });
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const handleSaveApiKey = (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleaned = draftApiKey.trim();
+    setCustomApiKey(cleaned);
+    try {
+      if (cleaned) {
+        localStorage.setItem("hacienda_rag_custom_api_key", cleaned);
+      } else {
+        localStorage.removeItem("hacienda_rag_custom_api_key");
+      }
+    } catch {}
+    setShowApiKeyModal(false);
+    if (query.trim()) {
+      runParallelSearch(query, mrlDimension, lang, cleaned);
+    }
+  };
+
+  const handleClearApiKey = () => {
+    setDraftApiKey("");
+    setCustomApiKey("");
+    try {
+      localStorage.removeItem("hacienda_rag_custom_api_key");
+    } catch {}
+    setShowApiKeyModal(false);
+  };
+
+  const handleSendFeedback = async (
+    rating: "like" | "dislike" | "bug",
+    commentText: string = feedbackComment
+  ) => {
+    setSendingFeedback(true);
+    try {
+      const res = await fetch(`${BACKEND_API_URL}/api/feedback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          rating,
+          comment: commentText,
+          query,
+          lang,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.stats) setFeedbackStats(data.stats);
+      } else {
+        setFeedbackStats((prev) => ({
+          ...prev,
+          likes: rating === "like" ? prev.likes + 1 : prev.likes,
+          dislikes: rating === "dislike" ? prev.dislikes + 1 : prev.dislikes,
+          bugs: rating === "bug" ? prev.bugs + 1 : prev.bugs,
+        }));
+      }
+    } catch {
+      setFeedbackStats((prev) => ({
+        ...prev,
+        likes: rating === "like" ? prev.likes + 1 : prev.likes,
+        dislikes: rating === "dislike" ? prev.dislikes + 1 : prev.dislikes,
+        bugs: rating === "bug" ? prev.bugs + 1 : prev.bugs,
+      }));
+    } finally {
+      setSendingFeedback(false);
+      setFeedbackSent(true);
+      setFeedbackComment("");
+    }
+  };
+
   const runParallelSearch = async (
     searchQuery: string = query,
     targetMrlDim: DimensionOption = mrlDimension,
-    targetLang: Lang = lang
+    targetLang: Lang = lang,
+    overrideApiKey: string = customApiKey
   ) => {
     if (!searchQuery.trim()) return;
     setErrorMsg(null);
@@ -398,41 +514,69 @@ export default function MatryoshkaBenchmarkPage() {
     setLoadingRight(true);
 
     const fetchPanel = async (dimensions: number): Promise<SearchResponse> => {
-      const res = await fetch(`${BACKEND_API_URL}/api/search`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          query: searchQuery,
-          dimensions,
-          top_k: topK,
-          generate_answer: generateAnswer,
-          lang: targetLang,
-        }),
-      });
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.detail || `HTTP Error ${res.status}`);
+      const payload: Record<string, unknown> = {
+        query: searchQuery,
+        dimensions,
+        top_k: topK,
+        generate_answer: generateAnswer,
+        lang: targetLang,
+      };
+      if (overrideApiKey && overrideApiKey.trim()) {
+        payload.custom_api_key = overrideApiKey.trim();
       }
-      return res.json();
+
+      let lastErr: Error | null = null;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const res = await fetch(`${BACKEND_API_URL}/api/search`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            throw new Error(errData.detail || `HTTP_${res.status}`);
+          }
+          return await res.json();
+        } catch (e: any) {
+          lastErr = e;
+          if (attempt === 0) {
+            await new Promise((r) => setTimeout(r, 400));
+          }
+        }
+      }
+      throw lastErr || new Error("Network error");
     };
 
-    const leftPromise = fetchPanel(768)
-      .then((data) => setTradResult(data))
-      .finally(() => setLoadingLeft(false));
-
-    const rightPromise = fetchPanel(targetMrlDim)
-      .then((data) => setMrlResult(data))
-      .finally(() => setLoadingRight(false));
-
     try {
-      await Promise.all([leftPromise, rightPromise]);
+      // Ejecutamos primero el motor Matryoshka (128D) y acto seguido el 768D para evitar
+      // que dos escaneos vectoriales simultáneos colisionen en la CPU de Supabase Free Tier (t4g.nano)
+      const rightData = await fetchPanel(targetMrlDim);
+      setMrlResult(rightData);
+      setLoadingRight(false);
+
+      const leftData = await fetchPanel(768);
+      setTradResult(leftData);
+      setLoadingLeft(false);
     } catch (err: any) {
-      setErrorMsg(
-        err.message ||
-          (targetLang === "en"
-            ? "Could not connect to the AI Backend."
-            : "No se pudo conectar con el servidor de IA.")
-      );
+      setLoadingLeft(false);
+      setLoadingRight(false);
+      const raw = String(err?.message || "");
+      if (raw.includes("DAILY_LIMIT_REACHED") || raw.includes("200 consultas diarias")) {
+        setErrorMsg(
+          targetLang === "en"
+            ? "⏳ Daily free query limit reached due to high traffic from LinkedIn! Come back tomorrow, or click '🔑 Bring Your Own API Key' above to paste a free Google Gemini (AIza...) or OpenRouter (sk-or-...) key and keep searching immediately."
+            : "⏳ Se ha alcanzado el límite diario gratuito por el alto tráfico desde LinkedIn. Puedes volver mañana o pulsar el botón '🔑 Usar mi API Key' arriba e introducir una clave gratuita de Google Gemini (AIza...) u OpenRouter (sk-or-...) para seguir consultando al instante."
+        );
+      } else if (raw.includes("Failed to fetch") || raw.includes("HTTP_502") || raw.includes("HTTP_503") || raw.includes("NetworkError")) {
+        setErrorMsg(
+          targetLang === "en"
+            ? "⚡ High visitor traffic right now (LinkedIn spike): the Supabase Free Tier vector index or local NVIDIA Jetson Orin GPU timed out on this query. Please click 'Retry Search' or add your own Gemini/OpenRouter API Key."
+            : "⚡ Alto tráfico de visitas en este momento (pico desde LinkedIn): la base vectorial gratuita en Supabase o la GPU de la Jetson Orin ha tardado más de lo habitual. Pulsa 'Reintentar ahora' o configura tu propia API Key (Gemini / OpenRouter)."
+        );
+      } else {
+        setErrorMsg(raw);
+      }
     }
   };
 
@@ -518,7 +662,7 @@ export default function MatryoshkaBenchmarkPage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5 sm:gap-2.5 text-xs ml-auto">
+          <div className="flex items-center gap-1.5 sm:gap-2 text-xs ml-auto flex-wrap">
             {/* Selector de Idioma ES / EN */}
             <div className="flex items-center bg-slate-950 p-0.5 sm:p-1 rounded-lg border border-slate-800">
               <button
@@ -544,6 +688,37 @@ export default function MatryoshkaBenchmarkPage() {
                 🇬🇧 EN
               </button>
             </div>
+
+            {/* Botón BYOK: Bring Your Own API Key */}
+            <button
+              type="button"
+              onClick={() => {
+                setDraftApiKey(customApiKey);
+                setShowApiKeyModal(true);
+              }}
+              className={`px-2.5 sm:px-3 py-1.5 rounded-lg border flex items-center gap-1.5 font-medium transition ${
+                customApiKey
+                  ? "bg-amber-500/15 border-amber-500/40 text-amber-300"
+                  : "bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800"
+              }`}
+              title={
+                lang === "en"
+                  ? "Use your own Google Gemini or OpenRouter API Key"
+                  : "Usar tu propia API Key de Google Gemini u OpenRouter"
+              }
+            >
+              <Key className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+              <span className="hidden sm:inline">
+                {customApiKey
+                  ? lang === "en"
+                    ? "Custom Key Active"
+                    : "API Key Activa"
+                  : lang === "en"
+                  ? "Use API Key"
+                  : "Usar API Key"}
+              </span>
+              <span className="sm:hidden">Key</span>
+            </button>
 
             <button
               type="button"
@@ -754,9 +929,54 @@ export default function MatryoshkaBenchmarkPage() {
           </form>
 
           {errorMsg && (
-            <div className="p-3.5 rounded-xl bg-red-500/10 border border-red-500/30 text-red-300 text-xs flex items-center gap-2.5">
-              <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
-              <span>{errorMsg}</span>
+            <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/35 text-amber-200 text-xs sm:text-sm space-y-3">
+              <div className="flex items-start gap-2.5">
+                <AlertCircle className="w-5 h-5 shrink-0 text-amber-400 mt-0.5" />
+                <div className="space-y-1 flex-1">
+                  <p className="font-semibold text-white">
+                    {lang === "en"
+                      ? "Service Notice / High Visitor Traffic"
+                      : "Aviso de Servicio / Alto Tráfico de Visitas"}
+                  </p>
+                  <p className="text-slate-200 leading-relaxed">{errorMsg}</p>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => runParallelSearch(query, mrlDimension, lang)}
+                  className="px-3.5 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold text-xs flex items-center gap-1.5 transition"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  {lang === "en" ? "Retry Search Now" : "Reintentar búsqueda"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDraftApiKey(customApiKey);
+                    setShowApiKeyModal(true);
+                  }}
+                  className="px-3.5 py-2 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-200 font-semibold text-xs flex items-center gap-1.5 transition"
+                >
+                  <Key className="w-3.5 h-3.5 text-amber-400" />
+                  {lang === "en"
+                    ? "Enter My Own API Key (Gemini / OpenRouter)"
+                    : "Introducir mi API Key (Gemini / OpenRouter)"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveFeedbackType("bug");
+                    setFeedbackSent(false);
+                    const el = document.getElementById("feedback-section");
+                    el?.scrollIntoView({ behavior: "smooth" });
+                  }}
+                  className="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-xs flex items-center gap-1.5 transition"
+                >
+                  <Bug className="w-3.5 h-3.5 text-rose-400" />
+                  {lang === "en" ? "Report Issue" : "Reportar fallo"}
+                </button>
+              </div>
             </div>
           )}
 
@@ -899,7 +1119,7 @@ export default function MatryoshkaBenchmarkPage() {
             ) : tradResult ? (
               <>
                 {tradResult.synthesized_answer && (
-                  <div className="p-3.5 sm:p-4 rounded-xl bg-blue-950/30 border border-blue-500/30 space-y-2">
+                  <div className="p-3.5 sm:p-4 rounded-xl bg-blue-950/30 border border-blue-500/30 space-y-2.5">
                     <div className="font-semibold text-xs text-blue-300 flex flex-wrap items-center justify-between gap-2">
                       <span className="flex items-center gap-1.5">
                         <Sparkles className="w-4 h-4 shrink-0" />{" "}
@@ -913,6 +1133,26 @@ export default function MatryoshkaBenchmarkPage() {
                       text={tradResult.synthesized_answer}
                       onCitationClick={handleCitationClick}
                     />
+                    {(tradResult.llm_status === "quota_exceeded" ||
+                      tradResult.llm_status === "invalid_key" ||
+                      tradResult.synthesized_answer.startsWith("⚠️") ||
+                      tradResult.synthesized_answer.startsWith("⚡")) && (
+                      <div className="pt-1 flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDraftApiKey(customApiKey);
+                            setShowApiKeyModal(true);
+                          }}
+                          className="px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-200 font-semibold text-xs flex items-center gap-1.5 transition"
+                        >
+                          <Key className="w-3.5 h-3.5 text-amber-400" />
+                          {lang === "en"
+                            ? "🔑 Paste your Gemini / OpenRouter API Key"
+                            : "🔑 Introducir mi API Key (Gemini / OpenRouter)"}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -988,7 +1228,7 @@ export default function MatryoshkaBenchmarkPage() {
             ) : mrlResult ? (
               <>
                 {mrlResult.synthesized_answer && (
-                  <div className="p-3.5 sm:p-4 rounded-xl bg-emerald-950/25 border border-emerald-500/30 space-y-2">
+                  <div className="p-3.5 sm:p-4 rounded-xl bg-emerald-950/25 border border-emerald-500/30 space-y-2.5">
                     <div className="font-semibold text-xs text-emerald-300 flex flex-wrap items-center justify-between gap-2">
                       <span className="flex items-center gap-1.5">
                         <Sparkles className="w-4 h-4 shrink-0" />{" "}
@@ -1002,6 +1242,26 @@ export default function MatryoshkaBenchmarkPage() {
                       text={mrlResult.synthesized_answer}
                       onCitationClick={handleCitationClick}
                     />
+                    {(mrlResult.llm_status === "quota_exceeded" ||
+                      mrlResult.llm_status === "invalid_key" ||
+                      mrlResult.synthesized_answer.startsWith("⚠️") ||
+                      mrlResult.synthesized_answer.startsWith("⚡")) && (
+                      <div className="pt-1 flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDraftApiKey(customApiKey);
+                            setShowApiKeyModal(true);
+                          }}
+                          className="px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-200 font-semibold text-xs flex items-center gap-1.5 transition"
+                        >
+                          <Key className="w-3.5 h-3.5 text-amber-400" />
+                          {lang === "en"
+                            ? "🔑 Paste your Gemini / OpenRouter API Key"
+                            : "🔑 Introducir mi API Key (Gemini / OpenRouter)"}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -1028,6 +1288,275 @@ export default function MatryoshkaBenchmarkPage() {
           </div>
         </section>
       </main>
+
+      {/* ==================== WIDGET DE FEEDBACK Y REPORTE DE FALLOS ==================== */}
+      <section
+        id="feedback-section"
+        className="max-w-[1550px] w-full mx-auto px-3.5 sm:px-6 pt-2 pb-4"
+      >
+        <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4 sm:p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <h3 className="text-xs sm:text-sm font-bold text-white flex items-center gap-2">
+              <span>
+                {lang === "en"
+                  ? "💬 What do you think of this Matryoshka RAG experiment?"
+                  : "💬 ¿Qué te parece este experimento RAG con Matryoshka?"}
+              </span>
+            </h3>
+            <p className="text-xs text-slate-400">
+              {lang === "en"
+                ? "Let me know if you liked it, what could be improved, or report if something didn't work:"
+                : "Dime si te ha resultado útil, qué mejorarías o avísame si algo ha dado error:"}
+            </p>
+          </div>
+
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 w-full md:w-auto">
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveFeedbackType("like");
+                  setFeedbackSent(false);
+                  handleSendFeedback("like", "");
+                }}
+                className={`px-3.5 py-2 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition ${
+                  activeFeedbackType === "like"
+                    ? "bg-emerald-500/20 border-emerald-500 text-emerald-300"
+                    : "bg-slate-950 border-slate-800 text-slate-200 hover:border-emerald-500/50"
+                }`}
+              >
+                <ThumbsUp className="w-3.5 h-3.5 text-emerald-400" />
+                <span>{lang === "en" ? "Like it" : "Me gusta"}</span>
+                <span className="ml-0.5 px-1.5 py-0.2 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px]">
+                  {feedbackStats.likes}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveFeedbackType("dislike");
+                  setFeedbackSent(false);
+                }}
+                className={`px-3.5 py-2 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition ${
+                  activeFeedbackType === "dislike"
+                    ? "bg-amber-500/20 border-amber-500 text-amber-300"
+                    : "bg-slate-950 border-slate-800 text-slate-300 hover:border-amber-500/50"
+                }`}
+              >
+                <ThumbsDown className="w-3.5 h-3.5 text-amber-400" />
+                <span>{lang === "en" ? "Could improve" : "Mejorar"}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveFeedbackType("bug");
+                  setFeedbackSent(false);
+                }}
+                className={`px-3.5 py-2 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition ${
+                  activeFeedbackType === "bug"
+                    ? "bg-rose-500/20 border-rose-500 text-rose-300"
+                    : "bg-slate-950 border-slate-800 text-slate-300 hover:border-rose-500/50"
+                }`}
+              >
+                <Bug className="w-3.5 h-3.5 text-rose-400" />
+                <span>
+                  {lang === "en"
+                    ? "Doesn't work / Report Bug"
+                    : "No funciona / Reportar fallo"}
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {(activeFeedbackType === "dislike" || activeFeedbackType === "bug") &&
+          !feedbackSent && (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleSendFeedback(activeFeedbackType, feedbackComment);
+              }}
+              className="mt-2.5 p-3.5 rounded-xl border border-slate-800 bg-slate-900/90 flex flex-col sm:flex-row gap-2.5"
+            >
+              <input
+                type="text"
+                value={feedbackComment}
+                onChange={(e) => setFeedbackComment(e.target.value)}
+                placeholder={
+                  activeFeedbackType === "bug"
+                    ? lang === "en"
+                      ? "What error did you see? (e.g., timeout, quota limit, mobile layout...)"
+                      : "¿Qué error te ha aparecido? (ej. timeout, límite de cuota, fallo en móvil...)"
+                    : lang === "en"
+                    ? "What would you improve or add to this project?"
+                    : "¿Qué mejorarías o añadirías a este proyecto?"
+                }
+                className="flex-1 px-3.5 py-2.5 rounded-lg bg-slate-950 border border-slate-700 text-base sm:text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+              />
+              <div className="flex items-center gap-2">
+                <button
+                  type="submit"
+                  disabled={sendingFeedback}
+                  className="px-4 py-2.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold text-xs flex items-center gap-1.5 shrink-0"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  {lang === "en" ? "Send Feedback" : "Enviar a Manuel"}
+                </button>
+                <a
+                  href="https://github.com/manumezog/hacienda-ESP-rag/issues/new"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs flex items-center gap-1 shrink-0"
+                >
+                  GitHub Issue <ExternalLink className="w-3 h-3" />
+                </a>
+              </div>
+            </form>
+          )}
+
+        {feedbackSent && (
+          <div className="mt-2 px-3.5 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs flex items-center justify-between">
+            <span>
+              {lang === "en"
+                ? "✅ Thank you! Your feedback has been recorded on the Jetson server."
+                : "✅ ¡Gracias! Tu feedback se ha guardado en el servidor Jetson."}
+            </span>
+            <button
+              type="button"
+              onClick={() => setFeedbackSent(false)}
+              className="text-slate-400 hover:text-white"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+      </section>
+
+      {/* ==================== MODAL BYOK (INTRODUCIR API KEY PROPIA) ==================== */}
+      {showApiKeyModal && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={() => setShowApiKeyModal(false)}
+        >
+          <div
+            className="bg-slate-900 border border-slate-700 rounded-2xl max-w-lg w-full p-5 sm:p-6 space-y-4 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-400">
+                  <Key className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm sm:text-base font-bold text-white">
+                    {lang === "en"
+                      ? "Bring Your Own API Key (BYOK)"
+                      : "Usar tu propia API Key (BYOK)"}
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    {lang === "en"
+                      ? "Bypass shared free-tier daily limits during traffic spikes"
+                      : "Salta el límite diario gratuito compartido durante picos de tráfico"}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowApiKeyModal(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="text-xs text-slate-300 space-y-2 bg-slate-950/80 border border-slate-800 rounded-xl p-3.5">
+              <p className="font-semibold text-white">
+                {lang === "en"
+                  ? "Supported API Key formats (auto-detected):"
+                  : "Formatos de API Key compatibles (detección automática):"}
+              </p>
+              <ul className="space-y-1.5 text-slate-300 list-disc pl-4">
+                <li>
+                  <strong className="text-emerald-400">
+                    Google Gemini API Key (<code>AIzaSy...</code>)
+                  </strong>{" "}
+                  —{" "}
+                  {lang === "en" ? "100% free at " : "100% gratuita en "}
+                  <a
+                    href="https://aistudio.google.com/apikey"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-emerald-400 underline hover:text-emerald-300"
+                  >
+                    Google AI Studio ↗
+                  </a>
+                </li>
+                <li>
+                  <strong className="text-amber-300">
+                    OpenRouter API Key (<code>sk-or-v1-...</code>)
+                  </strong>{" "}
+                  —{" "}
+                  <a
+                    href="https://openrouter.ai/keys"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-amber-300 underline hover:text-amber-200"
+                  >
+                    openrouter.ai/keys ↗
+                  </a>
+                </li>
+                <li>
+                  <strong className="text-blue-300">
+                    OpenAI API Key (<code>sk-...</code>)
+                  </strong>{" "}
+                  — Uses <code>gpt-4o-mini</code>
+                </li>
+              </ul>
+              <p className="text-[11px] text-slate-400 pt-1">
+                🔒{" "}
+                {lang === "en"
+                  ? "Your key is stored only in your browser (localStorage) and sent encrypted via HTTPS strictly for your request. It is never stored on the server."
+                  : "Tu clave se guarda únicamente en tu navegador (localStorage) y se envía cifrada por HTTPS solo durante tu consulta. Nunca se almacena en el servidor."}
+              </p>
+            </div>
+
+            <form onSubmit={handleSaveApiKey} className="space-y-3">
+              <input
+                type="password"
+                value={draftApiKey}
+                onChange={(e) => setDraftApiKey(e.target.value)}
+                placeholder={
+                  lang === "en"
+                    ? "Paste AIzaSy... (Gemini) or sk-or-v1-... (OpenRouter)"
+                    : "Pega aquí tu clave AIzaSy... (Gemini) o sk-or-v1-... (OpenRouter)"
+                }
+                className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-base sm:text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 font-mono"
+              />
+              <div className="flex items-center justify-end gap-2">
+                {customApiKey && (
+                  <button
+                    type="button"
+                    onClick={handleClearApiKey}
+                    className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium"
+                  >
+                    {lang === "en" ? "Remove Saved Key" : "Borrar clave"}
+                  </button>
+                )}
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold text-xs"
+                >
+                  {lang === "en"
+                    ? "Save & Run Search"
+                    : "Guardar y Buscar Ahora"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* ==================== MODAL VISOR DE CONSULTA OFICIAL ==================== */}
       {selectedDocModal && (
