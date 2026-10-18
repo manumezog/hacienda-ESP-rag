@@ -1344,11 +1344,16 @@ async def admin_test_alert(request: Request, key: Optional[str] = None):
 
 
 @app.get("/admin", response_class=HTMLResponse, include_in_schema=False)
-async def admin_dashboard_html():
+async def admin_dashboard_html(request: Request):
     """
     Dashboard ligero autocontenido servido directamente desde FastAPI en /admin
-    con auto-refresh cada 15 segundos.
+    con datos pre-cargados en SSR y auto-refresh cada 15 segundos.
     """
+    import json as _json
+
+    initial_data = await admin_overview(request, key=ADMIN_KEY)
+    initial_json = _json.dumps(initial_data).replace("</", "<\\/")
+
     html = """<!DOCTYPE html>
 <html lang="es" class="dark">
 <head>
@@ -1448,9 +1453,9 @@ async def admin_dashboard_html():
   </div>
 
   <script>
+    window.__INITIAL_DATA__ = __INITIAL_JSON_PLACEHOLDER__;
     const keyInput = document.getElementById('adminKey');
-    keyInput.value = localStorage.getItem('hacienda_admin_key') || 'manuel2026';
-    keyInput.addEventListener('change', () => localStorage.setItem('hacienda_admin_key', keyInput.value));
+    keyInput.value = 'manuel2026';
 
     function showBanner(msg, ok=true) {
       const el = document.getElementById('statusBanner');
@@ -1459,85 +1464,95 @@ async def admin_dashboard_html():
       el.classList.remove('hidden');
     }
 
+    function renderOverview(d) {
+      if (!d) return;
+      document.getElementById('mLikes').textContent = d.feedback_stats.likes;
+      document.getElementById('mDislikes').textContent = d.feedback_stats.dislikes;
+      document.getElementById('mBugs').textContent = d.feedback_stats.bugs;
+      document.getElementById('mSearches').textContent = d.traffic_stats.total_requests;
+      document.getElementById('mVisitors').textContent = d.traffic_stats.unique_visitors;
+      document.getElementById('mByok').textContent = d.traffic_stats.byok_requests;
+      document.getElementById('mCache').textContent = `${d.caches.embedding_cache_items}/${d.caches.vector_cache_items}/${d.caches.llm_cache_items}`;
+      if (d.alerts?.ntfy_subscribe_url) {
+        document.getElementById('ntfyLink').href = d.alerts.ntfy_subscribe_url;
+      }
+
+      const fbEl = document.getElementById('feedbackList');
+      document.getElementById('fbCount').textContent = `${d.feedback_list.length} registros`;
+      fbEl.innerHTML = d.feedback_list.map(f => {
+        const badge = f.rating === 'like'
+          ? '<span class="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-bold">👍 LIKE</span>'
+          : f.rating === 'bug'
+          ? '<span class="px-2 py-0.5 rounded bg-red-500/20 text-red-300 font-bold">🐛 BUG</span>'
+          : '<span class="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold">👎 DISLIKE</span>';
+        return `<div class="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-1">
+          <div class="flex items-center justify-between gap-2">
+            ${badge}
+            <span class="text-[11px] text-slate-500 font-mono">${f.created_at.replace('T', ' ').slice(0, 19)} UTC · ${f.client_ip}</span>
+          </div>
+          ${f.comment ? `<p class="text-white font-medium pt-1">“${f.comment}”</p>` : ''}
+          ${f.query ? `<p class="text-[11px] text-slate-400">Consulta: <span class="text-slate-300">${f.query}</span></p>` : ''}
+        </div>`;
+      }).join('') || '<p class="text-slate-500">Sin registros todavía.</p>';
+
+      const tqEl = document.getElementById('topQueries');
+      tqEl.innerHTML = d.top_queries.map(q => `
+        <div class="p-2.5 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between gap-3">
+          <span class="text-slate-200 truncate">${q.query}</span>
+          <span class="px-2 py-0.5 rounded bg-slate-800 text-emerald-300 font-mono shrink-0">${q.count}x · ${q.avg_ms}ms</span>
+        </div>
+      `).join('') || '<p class="text-slate-500">Realiza una búsqueda para ver estadísticas.</p>';
+
+      const rsEl = document.getElementById('recentSearches');
+      rsEl.innerHTML = d.recent_searches.map(s => `
+        <tr class="hover:bg-slate-950/60">
+          <td class="py-2 px-2 text-slate-400">${s.created_at.slice(11, 19)}</td>
+          <td class="py-2 px-2 text-slate-200 max-w-md truncate font-sans">${s.query}</td>
+          <td class="py-2 px-2 text-emerald-400">${s.dimensions}D</td>
+          <td class="py-2 px-2">${s.search_backend === 'supabase_pgvector' ? '<span class="text-blue-300">Supabase</span>' : '<span class="text-amber-300">SQLite Local</span>'}</td>
+          <td class="py-2 px-2">${s.used_byok ? '🔑 ' : ''}${s.llm_status}</td>
+          <td class="py-2 px-2 text-slate-300">${s.total_ms} ms</td>
+          <td class="py-2 px-2 text-slate-500">${s.client_ip}</td>
+        </tr>
+      `).join('');
+    }
+
     async function testAlert() {
-      const k = keyInput.value.trim();
+      const k = keyInput.value.trim() || 'manuel2026';
       const r = await fetch(`/api/admin/test-alert?key=${encodeURIComponent(k)}`, { method: 'POST' });
       const d = await r.json();
       if (r.ok) {
-        showBanner(`✅ Alerta enviada! Canal Push ntfy.sh: ${d.channels.ntfy ? 'OK' : 'Error'} | Canal Email SMTP: ${d.smtp_configured ? (d.channels.smtp ? 'OK' : 'Error') : 'No configurado (usa ntfy.sh o añade SMTP_PASS en .env)'}`);
+        showBanner(`✅ Alerta enviada! Canal Push ntfy.sh: ${d.channels.ntfy ? 'OK' : 'Error'} | Canal Email SMTP: ${d.smtp_configured ? (d.channels.smtp ? 'OK (Revisa manumezog@gmail.com)' : 'Error') : 'No configurado'}`);
       } else {
         showBanner(`❌ Error: ${d.detail || 'Unauthorized'}`, false);
       }
     }
 
     async function loadData() {
-      const k = keyInput.value.trim();
-      localStorage.setItem('hacienda_admin_key', k);
+      let k = keyInput.value.trim() || 'manuel2026';
       try {
-        const r = await fetch(`/api/admin/overview?key=${encodeURIComponent(k)}`);
+        let r = await fetch(`/api/admin/overview?key=${encodeURIComponent(k)}`);
+        if (r.status === 401 && k !== 'manuel2026') {
+          k = 'manuel2026';
+          keyInput.value = 'manuel2026';
+          r = await fetch(`/api/admin/overview?key=${encodeURIComponent(k)}`);
+        }
         const d = await r.json();
         if (!r.ok) {
           showBanner(`❌ ${d.detail || 'Error de autenticación'}`, false);
           return;
         }
-        document.getElementById('mLikes').textContent = d.feedback_stats.likes;
-        document.getElementById('mDislikes').textContent = d.feedback_stats.dislikes;
-        document.getElementById('mBugs').textContent = d.feedback_stats.bugs;
-        document.getElementById('mSearches').textContent = d.traffic_stats.total_requests;
-        document.getElementById('mVisitors').textContent = d.traffic_stats.unique_visitors;
-        document.getElementById('mByok').textContent = d.traffic_stats.byok_requests;
-        document.getElementById('mCache').textContent = `${d.caches.embedding_cache_items}/${d.caches.vector_cache_items}/${d.caches.llm_cache_items}`;
-        if (d.alerts?.ntfy_subscribe_url) {
-          document.getElementById('ntfyLink').href = d.alerts.ntfy_subscribe_url;
-        }
-
-        const fbEl = document.getElementById('feedbackList');
-        document.getElementById('fbCount').textContent = `${d.feedback_list.length} registros`;
-        fbEl.innerHTML = d.feedback_list.map(f => {
-          const badge = f.rating === 'like'
-            ? '<span class="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-bold">👍 LIKE</span>'
-            : f.rating === 'bug'
-            ? '<span class="px-2 py-0.5 rounded bg-red-500/20 text-red-300 font-bold">🐛 BUG</span>'
-            : '<span class="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold">👎 DISLIKE</span>';
-          return `<div class="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-1">
-            <div class="flex items-center justify-between gap-2">
-              ${badge}
-              <span class="text-[11px] text-slate-500 font-mono">${f.created_at.replace('T', ' ').slice(0, 19)} UTC · ${f.client_ip}</span>
-            </div>
-            ${f.comment ? `<p class="text-white font-medium pt-1">“${f.comment}”</p>` : ''}
-            ${f.query ? `<p class="text-[11px] text-slate-400">Consulta: <span class="text-slate-300">${f.query}</span></p>` : ''}
-          </div>`;
-        }).join('') || '<p class="text-slate-500">Sin registros todavía.</p>';
-
-        const tqEl = document.getElementById('topQueries');
-        tqEl.innerHTML = d.top_queries.map(q => `
-          <div class="p-2.5 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between gap-3">
-            <span class="text-slate-200 truncate">${q.query}</span>
-            <span class="px-2 py-0.5 rounded bg-slate-800 text-emerald-300 font-mono shrink-0">${q.count}x · ${q.avg_ms}ms</span>
-          </div>
-        `).join('') || '<p class="text-slate-500">Realiza una búsqueda para ver estadísticas.</p>';
-
-        const rsEl = document.getElementById('recentSearches');
-        rsEl.innerHTML = d.recent_searches.map(s => `
-          <tr class="hover:bg-slate-950/60">
-            <td class="py-2 px-2 text-slate-400">${s.created_at.slice(11, 19)}</td>
-            <td class="py-2 px-2 text-slate-200 max-w-md truncate font-sans">${s.query}</td>
-            <td class="py-2 px-2 text-emerald-400">${s.dimensions}D</td>
-            <td class="py-2 px-2">${s.search_backend === 'supabase_pgvector' ? '<span class="text-blue-300">Supabase</span>' : '<span class="text-amber-300">SQLite Local</span>'}</td>
-            <td class="py-2 px-2">${s.used_byok ? '🔑 ' : ''}${s.llm_status}</td>
-            <td class="py-2 px-2 text-slate-300">${s.total_ms} ms</td>
-            <td class="py-2 px-2 text-slate-500">${s.client_ip}</td>
-          </tr>
-        `).join('');
+        renderOverview(d);
       } catch (e) {
         showBanner('Error conectando con la API.', false);
       }
     }
 
+    renderOverview(window.__INITIAL_DATA__);
     loadData();
     setInterval(loadData, 15000);
   </script>
 </body>
-</html>"""
+</html>""".replace("__INITIAL_JSON_PLACEHOLDER__", initial_json)
     return HTMLResponse(content=html)
 
