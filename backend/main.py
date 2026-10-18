@@ -692,38 +692,48 @@ async def generate_llm_response(
     saw_quota_429 = False
     saw_auth_error = False
 
-    # 1. Google Gemini (gemini-2.0-flash primero para respuesta en ~1.5s sin latencia de thinking)
+    # 1. Google Gemini con reintento automático (backoff) si hay 429 por límite de 15 RPM
     if gemini_key:
-        gemini_models = ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-flash-latest"]
+        gemini_models = ["gemini-2.0-flash", "gemini-1.5-flash"]
         async with httpx.AsyncClient(timeout=25.0) as client:
             for g_model in gemini_models:
-                try:
-                    resp = await client.post(
-                        f"https://generativelanguage.googleapis.com/v1beta/models/{g_model}:generateContent?key={gemini_key}",
-                        json={
-                            "contents": [
-                                {
-                                    "parts": [
-                                        {"text": f"{system_prompt}\n\n{user_payload}"}
-                                    ]
-                                }
-                            ],
-                            "generationConfig": {"temperature": 0.1},
-                        },
-                    )
-                    if resp.status_code == 200:
-                        candidates = resp.json().get("candidates", [])
-                        if candidates:
-                            return candidates[0]["content"]["parts"][0]["text"], "ok"
-                    elif resp.status_code == 429:
-                        saw_quota_429 = True
-                    elif resp.status_code in (400, 401, 403):
-                        err_body = resp.text.lower()
-                        if "api_key_invalid" in err_body or "key not valid" in err_body or resp.status_code in (401, 403):
-                            saw_auth_error = True
-                            break
-                except Exception:
-                    pass
+                for attempt in range(3):
+                    try:
+                        resp = await client.post(
+                            f"https://generativelanguage.googleapis.com/v1beta/models/{g_model}:generateContent?key={gemini_key}",
+                            json={
+                                "contents": [
+                                    {
+                                        "parts": [
+                                            {"text": f"{system_prompt}\n\n{user_payload}"}
+                                        ]
+                                    }
+                                ],
+                                "generationConfig": {"temperature": 0.1},
+                            },
+                        )
+                        if resp.status_code == 200:
+                            candidates = resp.json().get("candidates", [])
+                            if candidates and "content" in candidates[0] and "parts" in candidates[0]["content"]:
+                                return candidates[0]["content"]["parts"][0]["text"], "ok"
+                        elif resp.status_code == 429:
+                            saw_quota_429 = True
+                            if attempt < 2:
+                                await asyncio.sleep(1.5 * (attempt + 1))
+                                continue
+                        elif resp.status_code in (400, 401, 403):
+                            err_body = resp.text.lower()
+                            if "api_key_invalid" in err_body or "key not valid" in err_body or resp.status_code in (401, 403):
+                                saw_auth_error = True
+                                break
+                        break
+                    except Exception:
+                        if attempt < 2:
+                            await asyncio.sleep(1.0)
+                            continue
+                        break
+                if saw_auth_error:
+                    break
 
     # 2. OpenRouter (sk-or-...)
     if openrouter_key:
@@ -853,16 +863,16 @@ async def generate_llm_response(
         msg = (
             "⚡ Free-tier daily AI synthesis quota reached due to high visitor traffic! The 10 official Tax Rulings retrieved below are 100% functional. Come back tomorrow or click '🔑 Bring Your Own API Key' above to paste a Google Gemini (AIza...), OpenRouter (sk-or-...), OpenAI (sk-...), Groq (gsk_...), or Anthropic key for instant AI synthesis."
             if lang == "en"
-            else "⚡ Cuota diaria gratuita de síntesis IA alcanzada por el alto tráfico de visitas. ¡Las 10 Consultas Vinculantes recuperadas abajo funcionan al 100%! Puedes volver mañana o pulsar el botón '🔑 Usar mi API Key' arriba e introducir una clave de Google Gemini (AIza...), OpenRouter (sk-or-...), OpenAI (sk-...), Groq (gsk_...) o Anthropic para generar el resumen jurídico al instante."
+            else "⚡ Cuota gratuita de síntesis IA alcanzada por el alto tráfico de visitas. ¡Las 10 Consultas Vinculantes recuperadas abajo funcionan al 100%! Puedes volver en unos minutos o pulsar el botón '🔑 Usar mi API Key' arriba e introducir una clave de Google Gemini (AIza...), OpenRouter (sk-or-...), OpenAI (sk-...), Groq (gsk_...) o Anthropic para generar el resumen jurídico al instante."
         )
         return msg, "quota_exceeded"
 
     msg = (
-        "⚠️ AI synthesis is temporarily saturated due to high demand. The 10 official Tax Rulings retrieved below are 100% available—or click '🔑 Bring Your Own API Key' to use your own Gemini / OpenRouter / OpenAI / Groq key."
+        "⚠️ AI synthesis is temporarily unavailable. The 10 official Tax Rulings retrieved below are 100% available—or click '🔑 Bring Your Own API Key' to use your own Gemini / OpenRouter / OpenAI / Groq key."
         if lang == "en"
-        else "⚠️ La síntesis con IA está temporalmente saturada por alta demanda. Las 10 Consultas Vinculantes recuperadas abajo están 100% disponibles, o puedes pulsar '🔑 Usar mi API Key' para usar tu propia clave de Gemini, OpenRouter, OpenAI o Groq."
+        else "⚠️ La síntesis con IA no está disponible en este instante. Las 10 Consultas Vinculantes recuperadas abajo están 100% disponibles, o puedes pulsar '🔑 Usar mi API Key' para usar tu propia clave de Gemini, OpenRouter, OpenAI o Groq."
     )
-    return msg, "quota_exceeded"
+    return msg, "error"
 
 
 def init_feedback_db() -> None:
