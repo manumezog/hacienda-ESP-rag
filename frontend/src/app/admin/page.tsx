@@ -88,9 +88,10 @@ interface AdminOverview {
 }
 
 export default function AdminDashboardPage() {
-  const [adminKey, setAdminKey] = useState("manuel2026");
+  const [adminKey, setAdminKey] = useState("");
+  const [authenticated, setAuthenticated] = useState(false);
   const [data, setData] = useState<AdminOverview | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [banner, setBanner] = useState<{ text: string; ok: boolean } | null>(
     null
   );
@@ -98,21 +99,20 @@ export default function AdminDashboardPage() {
 
   const fetchOverview = useCallback(
     async (customKey?: string) => {
-      let k = (customKey ?? adminKey).trim() || "manuel2026";
+      const k = (customKey ?? adminKey).trim();
+      if (!k) {
+        setAuthenticated(false);
+        return;
+      }
       setLoading(true);
       try {
-        let res = await fetch(
+        const res = await fetch(
           `${API_BASE_URL}/api/admin/overview?key=${encodeURIComponent(k)}`
         );
-        if (res.status === 401 && k !== "manuel2026") {
-          k = "manuel2026";
-          setAdminKey("manuel2026");
-          res = await fetch(
-            `${API_BASE_URL}/api/admin/overview?key=${encodeURIComponent(k)}`
-          );
-        }
         const json = await res.json();
         if (!res.ok) {
+          setAuthenticated(false);
+          window.localStorage.removeItem("hacienda_admin_key");
           setBanner({
             text: json.detail || "Clave de administrador incorrecta",
             ok: false,
@@ -120,6 +120,8 @@ export default function AdminDashboardPage() {
           setLoading(false);
           return;
         }
+        window.localStorage.setItem("hacienda_admin_key", k);
+        setAuthenticated(true);
         setData(json);
         setLastUpdated(new Date().toLocaleTimeString());
         setBanner(null);
@@ -136,12 +138,20 @@ export default function AdminDashboardPage() {
   );
 
   useEffect(() => {
-    fetchOverview();
+    const saved = window.localStorage.getItem("hacienda_admin_key");
+    if (saved) {
+      setAdminKey(saved);
+      fetchOverview(saved);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!authenticated || !adminKey.trim()) return;
     const timer = setInterval(() => {
-      fetchOverview();
+      fetchOverview(adminKey);
     }, 15000);
     return () => clearInterval(timer);
-  }, [fetchOverview]);
+  }, [authenticated, adminKey, fetchOverview]);
 
   const handleTestAlert = async () => {
     try {
@@ -173,6 +183,66 @@ export default function AdminDashboardPage() {
     }
   };
 
+  if (!authenticated) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4">
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-400">
+              <Key className="w-5 h-5" />
+            </div>
+            <div>
+              <h1 className="text-base font-bold text-white">
+                🔒 Panel Admin · Hacienda-ESP-RAG
+              </h1>
+              <p className="text-xs text-slate-400">
+                Introduce tu clave de administrador para ver telemetría y feedback
+              </p>
+            </div>
+          </div>
+
+          {banner && (
+            <div className="px-3.5 py-2.5 rounded-xl bg-red-500/10 border border-red-500/30 text-red-300 text-xs">
+              {banner.text}
+            </div>
+          )}
+
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              fetchOverview(adminKey);
+            }}
+            className="space-y-3"
+          >
+            <input
+              type="password"
+              value={adminKey}
+              onChange={(e) => setAdminKey(e.target.value)}
+              placeholder="Introduce tu ADMIN_KEY..."
+              autoFocus
+              className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 font-mono"
+            />
+            <div className="flex items-center justify-between gap-2">
+              <a
+                href="/"
+                className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium flex items-center gap-1.5"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" /> Volver
+              </a>
+              <button
+                type="submit"
+                disabled={loading || !adminKey.trim()}
+                className="px-5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-semibold text-xs"
+              >
+                {loading ? "Verificando..." : "Entrar al Panel"}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 p-4 sm:p-6">
       <div className="max-w-7xl mx-auto space-y-6">
@@ -201,23 +271,6 @@ export default function AdminDashboardPage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-700 rounded-xl px-2.5 py-1.5">
-              <Key className="w-3.5 h-3.5 text-slate-400" />
-              <input
-                type="password"
-                value={adminKey}
-                onChange={(e) => {
-                  setAdminKey(e.target.value);
-                  window.localStorage.setItem(
-                    "hacienda_admin_key",
-                    e.target.value
-                  );
-                }}
-                placeholder="Admin Key"
-                className="bg-transparent text-xs text-white focus:outline-none font-mono w-28"
-              />
-            </div>
-
             <button
               type="button"
               onClick={() => fetchOverview()}
@@ -236,6 +289,19 @@ export default function AdminDashboardPage() {
             >
               <Bell className="w-3.5 h-3.5" />
               Probar Alerta
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                window.localStorage.removeItem("hacienda_admin_key");
+                setAdminKey("");
+                setAuthenticated(false);
+                setData(null);
+              }}
+              className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium transition"
+            >
+              Cerrar sesión
             </button>
 
             {data?.alerts?.ntfy_subscribe_url && (

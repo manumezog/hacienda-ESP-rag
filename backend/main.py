@@ -1445,16 +1445,11 @@ async def admin_test_alert(request: Request, key: Optional[str] = None):
 
 
 @app.get("/admin", response_class=HTMLResponse, include_in_schema=False)
-async def admin_dashboard_html(request: Request):
+async def admin_dashboard_html():
     """
-    Dashboard ligero autocontenido servido directamente desde FastAPI en /admin
-    con datos pre-cargados en SSR y auto-refresh cada 15 segundos.
+    Dashboard protegido por contraseña servido en /admin.
+    No expone ningún dato en el HTML inicial hasta que el usuario introduce ADMIN_KEY.
     """
-    import json as _json
-
-    initial_data = await admin_overview(request, key=ADMIN_KEY)
-    initial_json = _json.dumps(initial_data).replace("</", "<\\/")
-
     html = """<!DOCTYPE html>
 <html lang="es" class="dark">
 <head>
@@ -1470,93 +1465,96 @@ async def admin_dashboard_html(request: Request):
         <span class="text-2xl">🪆</span>
         <div>
           <h1 class="text-lg sm:text-xl font-bold text-white">Hacienda-ESP-RAG · Live Admin & Feedback</h1>
-          <p class="text-xs text-slate-400">NVIDIA Jetson Orin Edge Telemetry · Auto-refresh cada 15s</p>
+          <p class="text-xs text-slate-400">NVIDIA Jetson Orin Edge Telemetry · Requiere Clave Admin</p>
         </div>
       </div>
       <div class="flex flex-wrap items-center gap-2">
-        <input id="adminKey" type="text" autocomplete="off" data-lpignore="true" value="manuel2026" placeholder="Admin Key (manuel2026)" class="px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-xs text-white font-mono" />
-        <button onclick="loadData()" class="px-3.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold text-xs">Actualizar</button>
+        <input id="adminKey" type="password" autocomplete="new-password" placeholder="Introduce tu ADMIN_KEY..." class="px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-xs text-white font-mono" />
+        <button onclick="loadData()" class="px-3.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold text-xs">Entrar / Actualizar</button>
         <button onclick="testAlert()" class="px-3.5 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 font-semibold text-xs">🔔 Probar Alerta</button>
-        <a id="ntfyLink" href="https://ntfy.sh/hacienda-rag-manuel-9f4a2b" target="_blank" class="px-3.5 py-1.5 rounded-lg bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 border border-blue-500/40 font-semibold text-xs">📱 Abrir Canal Push (ntfy.sh) ↗</a>
       </div>
     </header>
 
-    <div id="statusBanner" class="hidden px-4 py-2.5 rounded-xl border text-xs"></div>
-
-    <section class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
-      <div class="bg-slate-900 border border-slate-800 rounded-xl p-3.5">
-        <span class="text-[11px] text-slate-400">👍 Likes</span>
-        <p id="mLikes" class="text-2xl font-bold text-emerald-400 mt-1">-</p>
-      </div>
-      <div class="bg-slate-900 border border-slate-800 rounded-xl p-3.5">
-        <span class="text-[11px] text-slate-400">👎 Dislikes</span>
-        <p id="mDislikes" class="text-2xl font-bold text-amber-400 mt-1">-</p>
-      </div>
-      <div class="bg-slate-900 border border-slate-800 rounded-xl p-3.5">
-        <span class="text-[11px] text-slate-400">🐛 Bugs</span>
-        <p id="mBugs" class="text-2xl font-bold text-red-400 mt-1">-</p>
-      </div>
-      <div class="bg-slate-900 border border-slate-800 rounded-xl p-3.5">
-        <span class="text-[11px] text-slate-400">🔍 Búsquedas</span>
-        <p id="mSearches" class="text-2xl font-bold text-white mt-1">-</p>
-      </div>
-      <div class="bg-slate-900 border border-slate-800 rounded-xl p-3.5">
-        <span class="text-[11px] text-slate-400">👥 IPs Únicas</span>
-        <p id="mVisitors" class="text-2xl font-bold text-blue-400 mt-1">-</p>
-      </div>
-      <div class="bg-slate-900 border border-slate-800 rounded-xl p-3.5">
-        <span class="text-[11px] text-slate-400">🔑 Usos BYOK</span>
-        <p id="mByok" class="text-2xl font-bold text-purple-400 mt-1">-</p>
-      </div>
-      <div class="bg-slate-900 border border-slate-800 rounded-xl p-3.5">
-        <span class="text-[11px] text-slate-400">⚡ Caché (Emb/Vec/LLM)</span>
-        <p id="mCache" class="text-lg font-bold text-emerald-300 mt-1 font-mono">-/-/-</p>
-      </div>
-    </section>
-
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      <section class="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 space-y-3">
-        <h2 class="text-sm font-bold text-white flex items-center justify-between">
-          <span>💬 Feedback y Reportes de Usuarios</span>
-          <span id="fbCount" class="text-xs text-slate-400 font-mono"></span>
-        </h2>
-        <div id="feedbackList" class="space-y-2.5 max-h-[460px] overflow-y-auto pr-1 text-xs"></div>
-      </section>
-
-      <section class="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 space-y-3">
-        <h2 class="text-sm font-bold text-white flex items-center justify-between">
-          <span>🔥 Consultas Fiscales Más Buscadas</span>
-          <span class="text-xs text-slate-400">Top 12</span>
-        </h2>
-        <div id="topQueries" class="space-y-2 max-h-[460px] overflow-y-auto pr-1 text-xs"></div>
-      </section>
+    <div id="statusBanner" class="px-4 py-2.5 rounded-xl border text-xs bg-amber-500/10 border-amber-500/30 text-amber-300">
+      🔒 Introduce tu clave de administrador arriba y pulsa "Entrar / Actualizar" para desbloquear los datos.
     </div>
 
-    <section class="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 space-y-3">
-      <h2 class="text-sm font-bold text-white">📡 Últimas Búsquedas en Tiempo Real (Log de Tráfico)</h2>
-      <div class="overflow-x-auto">
-        <table class="w-full text-left text-xs border-collapse">
-          <thead>
-            <tr class="border-b border-slate-800 text-slate-400">
-              <th class="py-2 px-2">Hora UTC</th>
-              <th class="py-2 px-2">Consulta</th>
-              <th class="py-2 px-2">Dim</th>
-              <th class="py-2 px-2">Motor</th>
-              <th class="py-2 px-2">Estado LLM</th>
-              <th class="py-2 px-2">Total ms</th>
-              <th class="py-2 px-2">IP</th>
-            </tr>
-          </thead>
-          <tbody id="recentSearches" class="divide-y divide-slate-800/60 font-mono text-[11px]"></tbody>
-        </table>
+    <div id="dashboardContent" class="hidden space-y-6">
+      <section class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-3.5">
+          <span class="text-[11px] text-slate-400">👍 Likes</span>
+          <p id="mLikes" class="text-2xl font-bold text-emerald-400 mt-1">-</p>
+        </div>
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-3.5">
+          <span class="text-[11px] text-slate-400">👎 Dislikes</span>
+          <p id="mDislikes" class="text-2xl font-bold text-amber-400 mt-1">-</p>
+        </div>
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-3.5">
+          <span class="text-[11px] text-slate-400">🐛 Bugs</span>
+          <p id="mBugs" class="text-2xl font-bold text-red-400 mt-1">-</p>
+        </div>
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-3.5">
+          <span class="text-[11px] text-slate-400">🔍 Búsquedas</span>
+          <p id="mSearches" class="text-2xl font-bold text-white mt-1">-</p>
+        </div>
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-3.5">
+          <span class="text-[11px] text-slate-400">👥 IPs Únicas</span>
+          <p id="mVisitors" class="text-2xl font-bold text-blue-400 mt-1">-</p>
+        </div>
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-3.5">
+          <span class="text-[11px] text-slate-400">🔑 Usos BYOK</span>
+          <p id="mByok" class="text-2xl font-bold text-purple-400 mt-1">-</p>
+        </div>
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-3.5">
+          <span class="text-[11px] text-slate-400">⚡ Caché (Emb/Vec/LLM)</span>
+          <p id="mCache" class="text-lg font-bold text-emerald-300 mt-1 font-mono">-/-/-</p>
+        </div>
+      </section>
+
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <section class="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 space-y-3">
+          <h2 class="text-sm font-bold text-white flex items-center justify-between">
+            <span>💬 Feedback y Reportes de Usuarios</span>
+            <span id="fbCount" class="text-xs text-slate-400 font-mono"></span>
+          </h2>
+          <div id="feedbackList" class="space-y-2.5 max-h-[460px] overflow-y-auto pr-1 text-xs"></div>
+        </section>
+
+        <section class="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 space-y-3">
+          <h2 class="text-sm font-bold text-white flex items-center justify-between">
+            <span>🔥 Consultas Fiscales Más Buscadas</span>
+            <span class="text-xs text-slate-400">Top 12</span>
+          </h2>
+          <div id="topQueries" class="space-y-2 max-h-[460px] overflow-y-auto pr-1 text-xs"></div>
+        </section>
       </div>
-    </section>
+
+      <section class="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 space-y-3">
+        <h2 class="text-sm font-bold text-white">📡 Últimas Búsquedas en Tiempo Real (Log de Tráfico)</h2>
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs border-collapse">
+            <thead>
+              <tr class="border-b border-slate-800 text-slate-400">
+                <th class="py-2 px-2">Hora UTC</th>
+                <th class="py-2 px-2">Consulta</th>
+                <th class="py-2 px-2">Dim</th>
+                <th class="py-2 px-2">Motor</th>
+                <th class="py-2 px-2">Estado LLM</th>
+                <th class="py-2 px-2">Total ms</th>
+                <th class="py-2 px-2">IP</th>
+              </tr>
+            </thead>
+            <tbody id="recentSearches" class="divide-y divide-slate-800/60 font-mono text-[11px]"></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
   </div>
 
   <script>
-    window.__INITIAL_DATA__ = __INITIAL_JSON_PLACEHOLDER__;
     const keyInput = document.getElementById('adminKey');
-    keyInput.value = 'manuel2026';
+    const saved = localStorage.getItem('hacienda_admin_key');
+    if (saved) keyInput.value = saved;
 
     function showBanner(msg, ok=true) {
       const el = document.getElementById('statusBanner');
@@ -1567,6 +1565,8 @@ async def admin_dashboard_html(request: Request):
 
     function renderOverview(d) {
       if (!d) return;
+      document.getElementById('dashboardContent').classList.remove('hidden');
+      document.getElementById('statusBanner').classList.add('hidden');
       document.getElementById('mLikes').textContent = d.feedback_stats.likes;
       document.getElementById('mDislikes').textContent = d.feedback_stats.dislikes;
       document.getElementById('mBugs').textContent = d.feedback_stats.bugs;
@@ -1574,9 +1574,6 @@ async def admin_dashboard_html(request: Request):
       document.getElementById('mVisitors').textContent = d.traffic_stats.unique_visitors;
       document.getElementById('mByok').textContent = d.traffic_stats.byok_requests;
       document.getElementById('mCache').textContent = `${d.caches.embedding_cache_items}/${d.caches.vector_cache_items}/${d.caches.llm_cache_items}`;
-      if (d.alerts?.ntfy_subscribe_url) {
-        document.getElementById('ntfyLink').href = d.alerts.ntfy_subscribe_url;
-      }
 
       const fbEl = document.getElementById('feedbackList');
       document.getElementById('fbCount').textContent = `${d.feedback_list.length} registros`;
@@ -1599,7 +1596,7 @@ async def admin_dashboard_html(request: Request):
       const tqEl = document.getElementById('topQueries');
       tqEl.innerHTML = d.top_queries.map(q => `
         <div class="p-2.5 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between gap-3">
-          <span class="text-slate-200 truncate">${q.query}</span>
+          <span class="text-slate-200 break-words">${q.query}</span>
           <span class="px-2 py-0.5 rounded bg-slate-800 text-emerald-300 font-mono shrink-0">${q.count}x · ${q.avg_ms}ms</span>
         </div>
       `).join('') || '<p class="text-slate-500">Realiza una búsqueda para ver estadísticas.</p>';
@@ -1619,7 +1616,8 @@ async def admin_dashboard_html(request: Request):
     }
 
     async function testAlert() {
-      const k = keyInput.value.trim() || 'manuel2026';
+      const k = keyInput.value.trim();
+      if (!k) { showBanner('Introduce primero tu clave de administrador.', false); return; }
       const r = await fetch(`/api/admin/test-alert?key=${encodeURIComponent(k)}`, { method: 'POST' });
       const d = await r.json();
       if (r.ok) {
@@ -1630,30 +1628,28 @@ async def admin_dashboard_html(request: Request):
     }
 
     async function loadData() {
-      let k = keyInput.value.trim() || 'manuel2026';
+      const k = keyInput.value.trim();
+      if (!k) return;
       try {
-        let r = await fetch(`/api/admin/overview?key=${encodeURIComponent(k)}`);
-        if (r.status === 401 && k !== 'manuel2026') {
-          k = 'manuel2026';
-          keyInput.value = 'manuel2026';
-          r = await fetch(`/api/admin/overview?key=${encodeURIComponent(k)}`);
-        }
+        const r = await fetch(`/api/admin/overview?key=${encodeURIComponent(k)}`);
         const d = await r.json();
         if (!r.ok) {
-          showBanner(`❌ ${d.detail || 'Error de autenticación'}`, false);
+          localStorage.removeItem('hacienda_admin_key');
+          document.getElementById('dashboardContent').classList.add('hidden');
+          showBanner(`❌ ${d.detail || 'Clave de administrador incorrecta'}`, false);
           return;
         }
+        localStorage.setItem('hacienda_admin_key', k);
         renderOverview(d);
       } catch (e) {
         showBanner('Error conectando con la API.', false);
       }
     }
 
-    renderOverview(window.__INITIAL_DATA__);
-    loadData();
-    setInterval(loadData, 15000);
+    if (saved) loadData();
+    setInterval(() => { if (localStorage.getItem('hacienda_admin_key')) loadData(); }, 15000);
   </script>
 </body>
-</html>""".replace("__INITIAL_JSON_PLACEHOLDER__", initial_json)
+</html>"""
     return HTMLResponse(content=html)
 
