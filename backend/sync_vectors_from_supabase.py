@@ -36,6 +36,9 @@ def save_snapshot(all_vecs: list, all_meta: list) -> None:
     os.replace(str(tmp_meta), str(META_FILE))
 
 
+import urllib.parse
+
+
 def main():
     if not SUPABASE_URL or not SUPABASE_KEY:
         print("❌ Error: Faltan SUPABASE_URL o SUPABASE_KEY en .env", flush=True)
@@ -60,7 +63,7 @@ def main():
                 all_vecs = existing_mat.tolist()
                 last_chunk_id = all_meta[-1]["chunk_id"]
                 print(
-                    f"🔄 Reanudando desde {len(all_vecs)} vectores locales (último ID: {last_chunk_id})...",
+                    f"🔄 Reanudando desde {len(all_vecs)} vectores locales (último ID: {repr(last_chunk_id)})...",
                     flush=True,
                 )
         except Exception:
@@ -69,10 +72,13 @@ def main():
 
     print("🚀 Descargando vectores halfvec(768) desde Supabase a la Jetson (paginación O(1) por PK)...", flush=True)
     t0 = time.time()
+    consecutive_errors = 0
+    last_saved_count = len(all_vecs)
 
     with httpx.Client(http1=True, timeout=30.0) as client:
         while True:
-            filter_q = f"&chunk_id=gt.{last_chunk_id}" if last_chunk_id else ""
+            encoded_id = urllib.parse.quote(last_chunk_id, safe="")
+            filter_q = f"&chunk_id=gt.{encoded_id}" if last_chunk_id else ""
             url = (
                 f"{SUPABASE_URL}/rest/v1/consultas_chunks"
                 f"?select=chunk_id,num_consulta,chunk_index,fecha_iso,organo,embedding"
@@ -81,15 +87,28 @@ def main():
             try:
                 resp = client.get(url, headers=headers)
             except Exception as e:
-                print(f"⚠️ Error de red ({e}), reintentando en 2s...", flush=True)
-                time.sleep(2)
+                consecutive_errors += 1
+                print(f"⚠️ Error de red ({e}), reintentando ({consecutive_errors}/3)...", flush=True)
+                if consecutive_errors >= 3 and last_chunk_id:
+                    clean_prefix = last_chunk_id.splitlines()[0].strip()
+                    last_chunk_id = clean_prefix + "~"
+                    print(f"⏭️ Saltando ID corrupto hacia: {last_chunk_id}", flush=True)
+                    consecutive_errors = 0
+                time.sleep(1)
                 continue
 
             if resp.status_code != 200:
-                print(f"⚠️ HTTP {resp.status_code} tras {last_chunk_id}: {resp.text[:200]}", flush=True)
-                time.sleep(2)
+                consecutive_errors += 1
+                print(f"⚠️ HTTP {resp.status_code} tras {repr(last_chunk_id)}: {resp.text[:200]}", flush=True)
+                if consecutive_errors >= 3 and last_chunk_id:
+                    clean_prefix = last_chunk_id.splitlines()[0].strip()
+                    last_chunk_id = clean_prefix + "~"
+                    print(f"⏭️ Saltando ID con error HTTP hacia: {last_chunk_id}", flush=True)
+                    consecutive_errors = 0
+                time.sleep(1)
                 continue
 
+            consecutive_errors = 0
             rows = resp.json()
             if not rows:
                 break
@@ -110,16 +129,18 @@ def main():
                     )
 
             elapsed = time.time() - t0
+            clean_last = last_chunk_id.replace("\n", "\\n")[:40]
             print(
-                f"  ✓ Descargados {len(all_vecs)} vectores ({elapsed:.1f}s) | último: {last_chunk_id}",
+                f"  ✓ Descargados {len(all_vecs)} vectores ({elapsed:.1f}s) | último: {clean_last}",
                 flush=True,
             )
 
-            # Guardar snapshot atómico cada 5.000 vectores para que la Jetson ya pueda usarlos en vivo
-            if len(all_vecs) % 5000 < batch_size:
+            # Guardar snapshot atómico cada 2.500 vectores para activar motor local de inmediato
+            if len(all_vecs) - last_saved_count >= 2500:
                 save_snapshot(all_vecs, all_meta)
+                last_saved_count = len(all_vecs)
                 size_mb = VEC_FILE.stat().st_size / (1024 * 1024)
-                print(f"  💾 Snapshot intermedio activo en local ({len(all_vecs)} vectores, {size_mb:.1f} MB)", flush=True)
+                print(f"  💾 Snapshot activo en Jetson ({len(all_vecs)} vectores, {size_mb:.1f} MB)", flush=True)
 
             if len(rows) < batch_size:
                 break
