@@ -621,13 +621,14 @@ async def generate_llm_response(
     load_dotenv(override=True)
     raw_or_key = os.getenv("OPENROUTER_API_KEY", "").strip()
     raw_gem_key = os.getenv("GEMINI_API_KEY", "").strip()
+    raw_groq_key = os.getenv("GROQ_API_KEY", "").strip()
     llm_model = os.getenv("LLM_MODEL", "google/gemini-2.0-flash-001").strip()
 
     placeholders = {"", "TU_CLAVE_AQUI", "PEGAR_AQUI_TU_GEMINI_KEY", "tu-api-key"}
     openrouter_key = "" if raw_or_key in placeholders else raw_or_key
     gemini_key = "" if raw_gem_key in placeholders else raw_gem_key
+    groq_key = "" if raw_groq_key in placeholders else raw_groq_key
     openai_key = ""
-    groq_key = ""
     anthropic_key = ""
 
     if not gemini_key and openrouter_key.startswith("AIza"):
