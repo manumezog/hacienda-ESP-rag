@@ -1509,9 +1509,30 @@ export default function MatryoshkaBenchmarkPage() {
                 </li>
                 <li>
                   <strong className="text-blue-300">
-                    OpenAI API Key (<code>sk-...</code>)
+                    OpenAI API Key (<code>sk-...</code> / <code>sk-proj-...</code>)
                   </strong>{" "}
-                  — Uses <code>gpt-4o-mini</code>
+                  — <code>gpt-4o-mini</code>
+                </li>
+                <li>
+                  <strong className="text-purple-300">
+                    Groq API Key (<code>gsk_...</code>)
+                  </strong>{" "}
+                  —{" "}
+                  <a
+                    href="https://console.groq.com/keys"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-purple-300 underline hover:text-purple-200"
+                  >
+                    console.groq.com ↗
+                  </a>{" "}
+                  (<code>llama-3.3-70b-versatile</code>)
+                </li>
+                <li>
+                  <strong className="text-pink-300">
+                    Anthropic Claude API Key (<code>sk-ant-...</code>)
+                  </strong>{" "}
+                  — <code>claude-3-5-haiku</code>
                 </li>
               </ul>
               <p className="text-[11px] text-slate-400 pt-1">
@@ -1529,8 +1550,8 @@ export default function MatryoshkaBenchmarkPage() {
                 onChange={(e) => setDraftApiKey(e.target.value)}
                 placeholder={
                   lang === "en"
-                    ? "Paste AIzaSy... (Gemini) or sk-or-v1-... (OpenRouter)"
-                    : "Pega aquí tu clave AIzaSy... (Gemini) o sk-or-v1-... (OpenRouter)"
+                    ? "Paste AIzaSy..., sk-or-v1-..., sk-..., gsk_..., or sk-ant-..."
+                    : "Pega tu clave AIzaSy..., sk-or-v1-..., sk-..., gsk_... o sk-ant-..."
                 }
                 className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-base sm:text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 font-mono"
               />

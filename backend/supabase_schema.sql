@@ -27,12 +27,14 @@ CREATE TABLE IF NOT EXISTS consultas_chunks (
 CREATE INDEX IF NOT EXISTS idx_consultas_chunks_num_consulta ON consultas_chunks (num_consulta);
 CREATE INDEX IF NOT EXISTS idx_consultas_chunks_fecha_iso ON consultas_chunks (fecha_iso);
 
+-- Ampliar el timeout de los roles de PostgREST en Supabase Free Tier (por defecto anon = 3s)
+ALTER ROLE anon SET statement_timeout = '30s';
+ALTER ROLE authenticated SET statement_timeout = '30s';
+ALTER ROLE service_role SET statement_timeout = '60s';
+ALTER ROLE authenticator SET statement_timeout = '30s';
+NOTIFY pgrst, 'reload config';
+
 -- 3. Función RPC optimizada para búsqueda semántica con Slicing Dinámico Matryoshka
---    IMPORTANTE:
---    - Incluye SET LOCAL statement_timeout = '30s' para evitar que el rol anon/service_role
---      en instancias t4g.nano corte escaneos en frío con error 57014.
---    - Elimina la cláusula WHERE redundante sobre la distancia para calcular el operador (<=>)
---      UNA SOLA VEZ por fila (3x menos CPU en PostgreSQL).
 CREATE OR REPLACE FUNCTION match_documents(
     query_embedding halfvec,
     match_dimensions INT DEFAULT 128,
@@ -48,11 +50,11 @@ RETURNS TABLE (
     similarity FLOAT
 )
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     q_vec halfvec;
 BEGIN
-    -- Ampliar el timeout de esta transacción para evitar cortes 57014 en Free Tier (t4g.nano)
     SET LOCAL statement_timeout = '30s';
 
     -- Asegurar que el vector de entrada está truncado a match_dimensions

@@ -328,38 +328,36 @@ async def query_supabase_matches(
                 _vector_search_cache.move_to_end(cache_tuple)
                 return _vector_search_cache[cache_tuple], "supabase_pgvector"
 
-            for attempt, count_mult in enumerate([2, 1]):
-                match_count = min(max(top_k * count_mult, top_k + 4), 25)
-                try:
-                    async with httpx.AsyncClient(http1=True, timeout=20.0) as client:
-                        resp = await client.post(
-                            rpc_url,
-                            headers=headers,
-                            json={
-                                "query_embedding": truncated_vector,
-                                "match_dimensions": dimensions,
-                                "match_count": match_count,
-                            },
-                        )
-                        if resp.status_code == 200:
-                            raw_matches = resp.json() or []
-                            seen_consultas = set()
-                            matches = []
-                            for m in raw_matches:
-                                num_c = m.get("num_consulta")
-                                if num_c and num_c not in seen_consultas:
-                                    seen_consultas.add(num_c)
-                                    matches.append(m)
-                                    if len(matches) >= top_k:
-                                        break
-                            if matches:
-                                _vector_search_cache[cache_tuple] = matches
-                                if len(_vector_search_cache) > _EMBED_CACHE_MAX:
-                                    _vector_search_cache.popitem(last=False)
-                                return matches, "supabase_pgvector"
-                except Exception:
-                    if attempt == 0:
-                        await asyncio.sleep(0.25)
+            match_count = min(max(top_k * 2, top_k + 4), 24)
+            try:
+                async with httpx.AsyncClient(http1=True, timeout=12.0) as client:
+                    resp = await client.post(
+                        rpc_url,
+                        headers=headers,
+                        json={
+                            "query_embedding": truncated_vector,
+                            "match_dimensions": dimensions,
+                            "match_count": match_count,
+                        },
+                    )
+                    if resp.status_code == 200:
+                        raw_matches = resp.json() or []
+                        seen_consultas = set()
+                        matches = []
+                        for m in raw_matches:
+                            num_c = m.get("num_consulta")
+                            if num_c and num_c not in seen_consultas:
+                                seen_consultas.add(num_c)
+                                matches.append(m)
+                                if len(matches) >= top_k:
+                                    break
+                        if matches:
+                            _vector_search_cache[cache_tuple] = matches
+                            if len(_vector_search_cache) > _EMBED_CACHE_MAX:
+                                _vector_search_cache.popitem(last=False)
+                            return matches, "supabase_pgvector"
+            except Exception:
+                pass
 
     return [], "sqlite_local_fallback"
 
@@ -368,6 +366,7 @@ def search_fallback_sqlite(query: str, top_k: int) -> List[dict]:
     """
     Fallback ultrarrápido sobre el SQLite local (Read-Only) en caso de saturación
     o timeout temporal del Free Tier de Supabase durante picos de tráfico.
+    Evalúa únicamente cuestion_planteada y normativa para responder en < 80 ms.
     """
     if not SQLITE_DB_PATH.exists():
         return []
@@ -377,12 +376,13 @@ def search_fallback_sqlite(query: str, top_k: int) -> List[dict]:
         "qué", "puedo", "puede", "tengo", "sobre", "entre", "hasta", "desde", "cuando",
         "cuándo", "donde", "dónde", "este", "esta", "estos", "estas", "pero", "sino",
         "what", "when", "where", "which", "with", "from", "that", "this", "have", "under",
+        "deducir", "impuesto", "tengo", "hacer", "caso", "españa", "spanish",
     }
     words = [
         w.strip(".,;:¿?¡!()\"'")
         for w in query.lower().split()
         if len(w.strip(".,;:¿?¡!()\"'")) >= 4 and w.strip(".,;:¿?¡!()\"'") not in stop_words
-    ][:6]
+    ][:5]
 
     db_uri = f"{SQLITE_DB_PATH.as_uri()}?mode=ro"
     conn = sqlite3.connect(db_uri, uri=True)
@@ -396,7 +396,7 @@ def search_fallback_sqlite(query: str, top_k: int) -> List[dict]:
             )
         else:
             score_expr = " + ".join(
-                ["(CASE WHEN cuestion_planteada LIKE ? THEN 3 WHEN contestacion_completa LIKE ? THEN 1 ELSE 0 END)"]
+                ["(CASE WHEN cuestion_planteada LIKE ? THEN 2 WHEN normativa LIKE ? THEN 1 ELSE 0 END)"]
                 * len(words)
             )
             where_expr = " OR ".join(["cuestion_planteada LIKE ?"] * len(words))
@@ -427,7 +427,7 @@ def search_fallback_sqlite(query: str, top_k: int) -> List[dict]:
                     "chunk_index": 0,
                     "fecha_iso": r["fecha_salida"],
                     "organo": r["organo"],
-                    "similarity": round(max(0.82 - idx * 0.02, 0.60), 4),
+                    "similarity": round(max(0.84 - idx * 0.018, 0.62), 4),
                 }
             )
         return matches
@@ -483,8 +483,8 @@ def hydrate_from_sqlite(matches: List[dict]) -> List[HydratedDocument]:
         hydrated_results.append(
             HydratedDocument(
                 chunk_id=match.get("chunk_id", f"{num_c}_0"),
-                num_consulta=num_c,
                 chunk_index=match.get("chunk_index", 0),
+                num_consulta=num_c,
                 similarity=round(float(match.get("similarity", 0.0)), 4),
                 fecha_salida=local_doc.get("fecha_salida") or str(match.get("fecha_iso", "")),
                 organo=local_doc.get("organo") or match.get("organo", ""),
@@ -506,10 +506,14 @@ async def generate_llm_response(
 ) -> Tuple[Optional[str], Literal["ok", "skipped", "quota_exceeded", "invalid_key", "error"]]:
     """
     Genera una respuesta legal citando las consultas vinculantes hidratadas.
-    Soporta tanto la clave del servidor como una API Key aportada por el usuario (BYOK):
-    - Google Gemini API Key (empieza por 'AIza...')
-    - OpenRouter API Key (empieza por 'sk-or-...')
-    - OpenAI API Key (empieza por 'sk-...')
+    Soporta tanto la clave del servidor como una API Key aportada por el usuario (BYOK)
+    con autodetección universal de proveedor:
+    - Google Gemini API Key ('AIza...')
+    - OpenRouter API Key ('sk-or-...')
+    - OpenAI API Key ('sk-proj-...' o 'sk-...')
+    - Groq API Key ('gsk_...')
+    - Anthropic Claude API Key ('sk-ant-...')
+    - O cualquier clave compatible probando en cascada si no tiene prefijo estándar.
     """
     if not docs:
         return None, "skipped"
@@ -523,6 +527,8 @@ async def generate_llm_response(
     openrouter_key = "" if raw_or_key in placeholders else raw_or_key
     gemini_key = "" if raw_gem_key in placeholders else raw_gem_key
     openai_key = ""
+    groq_key = ""
+    anthropic_key = ""
 
     if not gemini_key and openrouter_key.startswith("AIza"):
         gemini_key = openrouter_key
@@ -530,26 +536,30 @@ async def generate_llm_response(
     elif gemini_key.startswith("AIza") and not openrouter_key.startswith("sk-or-"):
         openrouter_key = ""
 
-    # Si el usuario ha introducido su propia API Key (BYOK), priorizarla
-    user_key = (custom_api_key or "").strip()
+    # Si el usuario ha introducido su propia API Key (BYOK), limpiarla (quitar "Bearer " o comillas) y priorizarla
+    user_key = (custom_api_key or "").strip().strip("\"'")
+    if user_key.lower().startswith("bearer "):
+        user_key = user_key[7:].strip()
+
     using_custom_key = bool(user_key)
     if using_custom_key:
+        gemini_key = openrouter_key = openai_key = groq_key = anthropic_key = ""
         if user_key.startswith("AIza"):
             gemini_key = user_key
-            openrouter_key = ""
-            openai_key = ""
         elif user_key.startswith("sk-or-"):
             openrouter_key = user_key
-            gemini_key = ""
-            openai_key = ""
+        elif user_key.startswith("sk-ant-"):
+            anthropic_key = user_key
+        elif user_key.startswith("gsk_"):
+            groq_key = user_key
         elif user_key.startswith("sk-"):
             openai_key = user_key
-            gemini_key = ""
-            openrouter_key = ""
         else:
-            # Probar como Gemini o OpenRouter según formato
+            # Si el usuario pega una clave sin prefijo estándar, probamos en cascada Gemini -> OpenRouter -> OpenAI -> Groq
             gemini_key = user_key
-            openrouter_key = ""
+            openrouter_key = user_key
+            openai_key = user_key
+            groq_key = user_key
 
     context_blocks = []
     for d in docs[:3]:
@@ -582,9 +592,10 @@ async def generate_llm_response(
     saw_quota_429 = False
     saw_auth_error = False
 
+    # 1. Google Gemini (gemini-2.0-flash primero para respuesta en ~1.5s sin latencia de thinking)
     if gemini_key:
-        gemini_models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-latest"]
-        async with httpx.AsyncClient(timeout=35.0) as client:
+        gemini_models = ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-flash-latest"]
+        async with httpx.AsyncClient(timeout=25.0) as client:
             for g_model in gemini_models:
                 try:
                     resp = await client.post(
@@ -614,9 +625,10 @@ async def generate_llm_response(
                 except Exception:
                     pass
 
+    # 2. OpenRouter (sk-or-...)
     if openrouter_key:
-        or_models = [llm_model, "google/gemini-2.0-flash-001", "meta-llama/llama-3.3-70b-instruct:free"]
-        async with httpx.AsyncClient(timeout=35.0) as client:
+        or_models = [llm_model, "google/gemini-2.0-flash-001", "meta-llama/llama-3.3-70b-instruct:free", "openai/gpt-4o-mini"]
+        async with httpx.AsyncClient(timeout=25.0) as client:
             for or_m in dict.fromkeys(or_models):
                 try:
                     resp = await client.post(
@@ -643,50 +655,112 @@ async def generate_llm_response(
                 except Exception:
                     pass
 
+    # 3. OpenAI (sk-proj-... / sk-...)
     if openai_key:
-        async with httpx.AsyncClient(timeout=35.0) as client:
-            try:
-                resp = await client.post(
-                    "https://api.openai.com/v1/chat/completions",
-                    headers={"Authorization": f"Bearer {openai_key}"},
-                    json={
-                        "model": "gpt-4o-mini",
-                        "messages": [
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": user_payload},
-                        ],
-                        "temperature": 0.1,
-                    },
-                )
-                if resp.status_code == 200:
-                    return resp.json()["choices"][0]["message"]["content"], "ok"
-                elif resp.status_code == 429:
-                    saw_quota_429 = True
-                elif resp.status_code in (401, 403):
-                    saw_auth_error = True
-            except Exception:
-                pass
+        async with httpx.AsyncClient(timeout=25.0) as client:
+            for oai_model in ["gpt-4o-mini", "gpt-4.1-mini", "gpt-4o"]:
+                try:
+                    resp = await client.post(
+                        "https://api.openai.com/v1/chat/completions",
+                        headers={"Authorization": f"Bearer {openai_key}"},
+                        json={
+                            "model": oai_model,
+                            "messages": [
+                                {"role": "system", "content": system_prompt},
+                                {"role": "user", "content": user_payload},
+                            ],
+                            "temperature": 0.1,
+                        },
+                    )
+                    if resp.status_code == 200:
+                        return resp.json()["choices"][0]["message"]["content"], "ok"
+                    elif resp.status_code == 429:
+                        saw_quota_429 = True
+                    elif resp.status_code in (401, 403):
+                        saw_auth_error = True
+                        break
+                except Exception:
+                    pass
+
+    # 4. Groq (gsk_...)
+    if groq_key:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            for groq_model in ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]:
+                try:
+                    resp = await client.post(
+                        "https://api.groq.com/openai/v1/chat/completions",
+                        headers={"Authorization": f"Bearer {groq_key}"},
+                        json={
+                            "model": groq_model,
+                            "messages": [
+                                {"role": "system", "content": system_prompt},
+                                {"role": "user", "content": user_payload},
+                            ],
+                            "temperature": 0.1,
+                        },
+                    )
+                    if resp.status_code == 200:
+                        return resp.json()["choices"][0]["message"]["content"], "ok"
+                    elif resp.status_code == 429:
+                        saw_quota_429 = True
+                    elif resp.status_code in (401, 403):
+                        saw_auth_error = True
+                        break
+                except Exception:
+                    pass
+
+    # 5. Anthropic Claude (sk-ant-...)
+    if anthropic_key:
+        async with httpx.AsyncClient(timeout=25.0) as client:
+            for claude_model in ["claude-3-5-haiku-latest", "claude-3-7-sonnet-latest"]:
+                try:
+                    resp = await client.post(
+                        "https://api.anthropic.com/v1/messages",
+                        headers={
+                            "x-api-key": anthropic_key,
+                            "anthropic-version": "2023-06-01",
+                            "content-type": "application/json",
+                        },
+                        json={
+                            "model": claude_model,
+                            "max_tokens": 500,
+                            "system": system_prompt,
+                            "messages": [{"role": "user", "content": user_payload}],
+                            "temperature": 0.1,
+                        },
+                    )
+                    if resp.status_code == 200:
+                        content_list = resp.json().get("content", [])
+                        if content_list:
+                            return content_list[0].get("text", ""), "ok"
+                    elif resp.status_code == 429:
+                        saw_quota_429 = True
+                    elif resp.status_code in (401, 403):
+                        saw_auth_error = True
+                        break
+                except Exception:
+                    pass
 
     if using_custom_key and saw_auth_error:
         msg = (
-            "⚠️ The custom API Key provided appears invalid or unauthorized. Please check that it is a valid Google Gemini ('AIza...'), OpenRouter ('sk-or-...'), or OpenAI ('sk-...') key."
+            "⚠️ The custom API Key provided appears invalid or unauthorized. Supported keys: Google Gemini ('AIza...'), OpenRouter ('sk-or-...'), OpenAI ('sk-...'), Groq ('gsk_...'), or Anthropic ('sk-ant-...')."
             if lang == "en"
-            else "⚠️ La API Key introducida no es válida o no tiene permisos. Comprueba que sea una clave válida de Google Gemini ('AIza...'), OpenRouter ('sk-or-...') u OpenAI ('sk-...')."
+            else "⚠️ La API Key introducida no es válida o no tiene permisos. Claves soportadas: Google Gemini ('AIza...'), OpenRouter ('sk-or-...'), OpenAI ('sk-...'), Groq ('gsk_...') o Anthropic ('sk-ant-...')."
         )
         return msg, "invalid_key"
 
     if saw_quota_429:
         msg = (
-            "⚡ Free-tier daily AI synthesis quota reached due to high visitor traffic! The 10 official Tax Rulings retrieved below are 100% functional. Come back tomorrow or click '🔑 Bring Your Own API Key' above to paste a free Google Gemini (AIza...) or OpenRouter (sk-or-...) key for instant AI synthesis."
+            "⚡ Free-tier daily AI synthesis quota reached due to high visitor traffic! The 10 official Tax Rulings retrieved below are 100% functional. Come back tomorrow or click '🔑 Bring Your Own API Key' above to paste a Google Gemini (AIza...), OpenRouter (sk-or-...), OpenAI (sk-...), Groq (gsk_...), or Anthropic key for instant AI synthesis."
             if lang == "en"
-            else "⚡ Cuota diaria gratuita de síntesis IA alcanzada por el alto tráfico de visitas. ¡Las 10 Consultas Vinculantes recuperadas abajo funcionan al 100%! Puedes volver mañana o pulsar el botón '🔑 Usar mi API Key' arriba e introducir una clave gratuita de Google Gemini (AIza...) u OpenRouter (sk-or-...) para generar el resumen jurídico al instante."
+            else "⚡ Cuota diaria gratuita de síntesis IA alcanzada por el alto tráfico de visitas. ¡Las 10 Consultas Vinculantes recuperadas abajo funcionan al 100%! Puedes volver mañana o pulsar el botón '🔑 Usar mi API Key' arriba e introducir una clave de Google Gemini (AIza...), OpenRouter (sk-or-...), OpenAI (sk-...), Groq (gsk_...) o Anthropic para generar el resumen jurídico al instante."
         )
         return msg, "quota_exceeded"
 
     msg = (
-        "⚠️ AI synthesis is temporarily saturated due to high demand. The 10 official Tax Rulings retrieved below are 100% available—or click '🔑 Bring Your Own API Key' to use your own Gemini / OpenRouter key."
+        "⚠️ AI synthesis is temporarily saturated due to high demand. The 10 official Tax Rulings retrieved below are 100% available—or click '🔑 Bring Your Own API Key' to use your own Gemini / OpenRouter / OpenAI / Groq key."
         if lang == "en"
-        else "⚠️ La síntesis con IA está temporalmente saturada por alta demanda. Las 10 Consultas Vinculantes recuperadas abajo están 100% disponibles, o puedes pulsar '🔑 Usar mi API Key' para usar tu propia clave de Gemini u OpenRouter."
+        else "⚠️ La síntesis con IA está temporalmente saturada por alta demanda. Las 10 Consultas Vinculantes recuperadas abajo están 100% disponibles, o puedes pulsar '🔑 Usar mi API Key' para usar tu propia clave de Gemini, OpenRouter, OpenAI o Groq."
     )
     return msg, "quota_exceeded"
 
@@ -789,6 +863,11 @@ async def search_consultas(req: SearchRequest, request: Request):
     if not matches:
         matches = search_fallback_sqlite(req.query, req.top_k)
         search_backend = "sqlite_local_fallback"
+        if matches:
+            cache_tuple = (req.query.strip().lower(), req.dimensions, req.top_k)
+            _vector_search_cache[cache_tuple] = matches
+            if len(_vector_search_cache) > _EMBED_CACHE_MAX:
+                _vector_search_cache.popitem(last=False)
     vector_search_ms = (time.perf_counter() - t1) * 1000
 
     # 4. Hidratación local desde SQLite (Cold Storage en modo Read-Only)
