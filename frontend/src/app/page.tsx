@@ -1019,11 +1019,15 @@ export default function MatryoshkaBenchmarkPage() {
                     {t.metricCloudTitle}
                   </p>
                   <p className="text-base sm:text-xl font-bold text-amber-300 mt-0.5">
-                    {(mrlResult.latency.vector_search_ms / 1000).toFixed(2)} s{" "}
+                    {mrlResult.latency.vector_search_ms < 1000
+                      ? `${mrlResult.latency.vector_search_ms.toFixed(1)} ms`
+                      : `${(mrlResult.latency.vector_search_ms / 1000).toFixed(2)} s`}{" "}
                     <span className="block sm:inline text-[10px] sm:text-xs font-normal text-slate-400 truncate">
                       vs{" "}
-                      {(tradResult.latency.vector_search_ms / 1000).toFixed(2)}{" "}
-                      s (768D)
+                      {tradResult.latency.vector_search_ms < 1000
+                        ? `${tradResult.latency.vector_search_ms.toFixed(1)} ms`
+                        : `${(tradResult.latency.vector_search_ms / 1000).toFixed(2)} s`}{" "}
+                      (768D)
                     </span>
                   </p>
                 </div>
