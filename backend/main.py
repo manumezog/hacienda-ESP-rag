@@ -913,11 +913,64 @@ def init_feedback_db() -> None:
                 )
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS system_settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            # Valor por defecto: alertas de email activadas (1) si no existe
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO system_settings (key, value, updated_at)
+                VALUES ('email_alerts_enabled', '1', datetime('now'))
+                """
+            )
             conn.commit()
         finally:
             conn.close()
     except Exception:
         pass
+
+
+def is_email_alerts_enabled() -> bool:
+    try:
+        conn = sqlite3.connect(str(FEEDBACK_DB_PATH))
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT value FROM system_settings WHERE key = 'email_alerts_enabled'")
+            row = cur.fetchone()
+            if row:
+                return row[0] == "1"
+        finally:
+            conn.close()
+    except Exception:
+        pass
+    return True
+
+
+def set_email_alerts_enabled(enabled: bool) -> bool:
+    try:
+        conn = sqlite3.connect(str(FEEDBACK_DB_PATH))
+        try:
+            val = "1" if enabled else "0"
+            conn.execute(
+                """
+                INSERT INTO system_settings (key, value, updated_at)
+                VALUES ('email_alerts_enabled', ?, datetime('now'))
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+                """,
+                (val,),
+            )
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+    except Exception:
+        return False
 
 
 init_feedback_db()
@@ -1002,7 +1055,7 @@ async def send_alert_notification(
         except Exception:
             pass
 
-    if smtp_pass:
+    if smtp_pass and is_email_alerts_enabled():
         smtp_ok = await asyncio.to_thread(_send_smtp_sync, f"[Hacienda-RAG] {title}", body)
 
     return {"ntfy": ntfy_ok, "smtp": smtp_ok}
@@ -1435,8 +1488,22 @@ async def admin_overview(request: Request, key: Optional[str] = None):
             "ntfy_topic": NTFY_TOPIC,
             "ntfy_subscribe_url": f"https://ntfy.sh/{NTFY_TOPIC}",
             "smtp_configured": bool(SMTP_PASS),
+            "email_alerts_enabled": is_email_alerts_enabled(),
             "alert_email": ALERT_EMAIL,
         },
+    }
+
+
+@app.post("/api/admin/toggle-email-alerts")
+async def admin_toggle_email_alerts(request: Request, key: Optional[str] = None):
+    verify_admin_key(request, key)
+    current = is_email_alerts_enabled()
+    new_state = not current
+    ok = set_email_alerts_enabled(new_state)
+    return {
+        "status": "ok" if ok else "error",
+        "email_alerts_enabled": new_state,
+        "message": f"Alertas por email {'activadas' if new_state else 'desactivadas'} correctamente."
     }
 
 
@@ -1454,6 +1521,7 @@ async def admin_test_alert(request: Request, key: Optional[str] = None):
         "channels": res,
         "ntfy_subscribe_url": f"https://ntfy.sh/{NTFY_TOPIC}",
         "smtp_configured": bool(SMTP_PASS),
+        "email_alerts_enabled": is_email_alerts_enabled(),
     }
 
 
@@ -1484,6 +1552,7 @@ async def admin_dashboard_html():
       <div class="flex flex-wrap items-center gap-2">
         <input id="adminKey" type="password" autocomplete="new-password" placeholder="Introduce tu ADMIN_KEY..." class="px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-xs text-white font-mono" />
         <button onclick="loadData()" class="px-3.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold text-xs">Entrar / Actualizar</button>
+        <button id="btnEmailToggle" onclick="toggleEmailAlerts()" class="px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 font-semibold text-xs flex items-center gap-1.5">✉️ Email: Comprobando...</button>
         <button onclick="testAlert()" class="px-3.5 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 font-semibold text-xs">🔔 Probar Alerta</button>
       </div>
     </header>
@@ -1565,6 +1634,7 @@ async def admin_dashboard_html():
   </div>
 
   <script>
+    let currentEmailEnabled = true;
     const keyInput = document.getElementById('adminKey');
     const saved = localStorage.getItem('hacienda_admin_key');
     if (saved) keyInput.value = saved;
@@ -1574,6 +1644,36 @@ async def admin_dashboard_html():
       el.className = `px-4 py-2.5 rounded-xl border text-xs ${ok ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : 'bg-red-500/10 border-red-500/30 text-red-300'}`;
       el.textContent = msg;
       el.classList.remove('hidden');
+    }
+
+    function updateEmailBtn(enabled) {
+      currentEmailEnabled = enabled;
+      const btn = document.getElementById('btnEmailToggle');
+      if (!btn) return;
+      if (enabled) {
+        btn.className = "px-3.5 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 font-semibold text-xs flex items-center gap-1.5 transition";
+        btn.innerHTML = "✉️ Alertas Email: <span class='font-bold text-white'>ACTIVAS</span>";
+      } else {
+        btn.className = "px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 font-semibold text-xs flex items-center gap-1.5 transition";
+        btn.innerHTML = "🔕 Alertas Email: <span class='font-bold text-slate-300'>PAUSADAS</span>";
+      }
+    }
+
+    async function toggleEmailAlerts() {
+      const k = keyInput.value.trim();
+      if (!k) { showBanner('Introduce primero tu clave de administrador.', false); return; }
+      try {
+        const r = await fetch(`/api/admin/toggle-email-alerts?key=${encodeURIComponent(k)}`, { method: 'POST' });
+        const d = await r.json();
+        if (r.ok) {
+          updateEmailBtn(d.email_alerts_enabled);
+          showBanner(`🔔 ${d.message}`);
+        } else {
+          showBanner(`❌ Error: ${d.detail || 'Unauthorized'}`, false);
+        }
+      } catch (e) {
+        showBanner('Error de conexión al cambiar alertas.', false);
+      }
     }
 
     function renderOverview(d) {
@@ -1587,6 +1687,10 @@ async def admin_dashboard_html():
       document.getElementById('mVisitors').textContent = d.traffic_stats.unique_visitors;
       document.getElementById('mByok').textContent = d.traffic_stats.byok_requests;
       document.getElementById('mCache').textContent = `${d.caches.embedding_cache_items}/${d.caches.vector_cache_items}/${d.caches.llm_cache_items}`;
+
+      if (d.alerts && typeof d.alerts.email_alerts_enabled !== 'undefined') {
+        updateEmailBtn(d.alerts.email_alerts_enabled);
+      }
 
       const fbEl = document.getElementById('feedbackList');
       document.getElementById('fbCount').textContent = `${d.feedback_list.length} registros`;

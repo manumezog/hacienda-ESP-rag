@@ -15,6 +15,8 @@ import {
   Users,
   Cpu,
   ArrowLeft,
+  Mail,
+  MailX,
 } from "lucide-react";
 
 const _rawEnvApiUrl = process.env.NEXT_PUBLIC_API_URL || "";
@@ -83,6 +85,7 @@ interface AdminOverview {
     ntfy_topic: string;
     ntfy_subscribe_url: string;
     smtp_configured: boolean;
+    email_alerts_enabled?: boolean;
     alert_email: string;
   };
 }
@@ -153,6 +156,26 @@ export default function AdminDashboardPage() {
     return () => clearInterval(timer);
   }, [authenticated, adminKey, fetchOverview]);
 
+  const handleToggleEmailAlerts = async () => {
+    try {
+      const res = await fetch(
+        `${API_BASE_URL}/api/admin/toggle-email-alerts?key=${encodeURIComponent(
+          adminKey.trim()
+        )}`,
+        { method: "POST" }
+      );
+      const json = await res.json();
+      if (res.ok) {
+        setBanner({ text: `🔔 ${json.message}`, ok: true });
+        fetchOverview();
+      } else {
+        setBanner({ text: json.detail || "Error al cambiar estado de alertas", ok: false });
+      }
+    } catch {
+      setBanner({ text: "Error de red al alternar alertas", ok: false });
+    }
+  };
+
   const handleTestAlert = async () => {
     try {
       const res = await fetch(
@@ -170,7 +193,7 @@ export default function AdminDashboardPage() {
             json.smtp_configured
               ? json.channels?.smtp
                 ? "Enviado OK"
-                : "Error"
+                : (json.email_alerts_enabled === false ? "Pausado (activar con el botón de Email)" : "Error")
               : "Usa el canal Push ntfy.sh o añade SMTP_PASS en backend/.env"
           }`,
           ok: true,
@@ -280,6 +303,29 @@ export default function AdminDashboardPage() {
                 className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`}
               />
               Actualizar
+            </button>
+
+            <button
+              type="button"
+              onClick={handleToggleEmailAlerts}
+              className={`px-3 py-1.5 rounded-xl border font-semibold text-xs flex items-center gap-1.5 transition ${
+                data?.alerts?.email_alerts_enabled
+                  ? "bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border-emerald-500/30"
+                  : "bg-slate-800 hover:bg-slate-700 text-slate-400 border-slate-700"
+              }`}
+              title="Activar o pausar el envío de alertas automáticas a tu correo Gmail"
+            >
+              {data?.alerts?.email_alerts_enabled ? (
+                <>
+                  <Mail className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Email: <strong className="text-white">Activo</strong></span>
+                </>
+              ) : (
+                <>
+                  <MailX className="w-3.5 h-3.5 text-slate-400" />
+                  <span>Email: <strong className="text-slate-300">Pausado</strong></span>
+                </>
+              )}
             </button>
 
             <button
