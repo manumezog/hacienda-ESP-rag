@@ -840,16 +840,23 @@ def mask_ip(ip: str) -> str:
 
 
 def _send_smtp_sync(subject: str, body: str) -> bool:
-    if not (SMTP_HOST and SMTP_USER and SMTP_PASS and ALERT_EMAIL):
+    load_dotenv(override=True)
+    smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com").strip()
+    smtp_port = int(os.getenv("SMTP_PORT", "465"))
+    smtp_user = os.getenv("SMTP_USER", "manumezog@gmail.com").strip()
+    smtp_pass = os.getenv("SMTP_PASS", "").strip().replace(" ", "")
+    alert_email = os.getenv("ALERT_EMAIL", "manumezog@gmail.com").strip()
+
+    if not (smtp_host and smtp_user and smtp_pass and alert_email):
         return False
     try:
         msg = EmailMessage()
         msg["Subject"] = subject
-        msg["From"] = SMTP_USER
-        msg["To"] = ALERT_EMAIL
+        msg["From"] = smtp_user
+        msg["To"] = alert_email
         msg.set_content(body)
-        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=10) as server:
-            server.login(SMTP_USER, SMTP_PASS)
+        with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=10) as server:
+            server.login(smtp_user, smtp_pass)
             server.send_message(msg)
         return True
     except Exception:
@@ -869,11 +876,13 @@ async def send_alert_notification(
     1) Canal Push/Web/Email instantáneo vía ntfy.sh (sin configuración previa necesaria).
     2) Canal Email directo vía SMTP (si SMTP_PASS está configurado en backend/.env).
     """
+    load_dotenv(override=True)
+    smtp_pass = os.getenv("SMTP_PASS", "").strip()
     now = time.time()
     if cooldown_key:
         last_sent = _alert_cooldowns.get(cooldown_key, 0.0)
         if now - last_sent < ALERT_COOLDOWN_SEC:
-            return {"ntfy": False, "smtp": False, " throttled": True}
+            return {"ntfy": False, "smtp": False, "throttled": True}
         _alert_cooldowns[cooldown_key] = now
 
     ntfy_ok = False
@@ -896,7 +905,7 @@ async def send_alert_notification(
         except Exception:
             pass
 
-    if SMTP_PASS:
+    if smtp_pass:
         smtp_ok = await asyncio.to_thread(_send_smtp_sync, f"[Hacienda-RAG] {title}", body)
 
     return {"ntfy": ntfy_ok, "smtp": smtp_ok}
@@ -1359,7 +1368,7 @@ async def admin_dashboard_html():
         </div>
       </div>
       <div class="flex flex-wrap items-center gap-2">
-        <input id="adminKey" type="password" placeholder="Admin Key (manuel2026)" class="px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-xs text-white font-mono" />
+        <input id="adminKey" type="text" autocomplete="off" data-lpignore="true" value="manuel2026" placeholder="Admin Key (manuel2026)" class="px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-xs text-white font-mono" />
         <button onclick="loadData()" class="px-3.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold text-xs">Actualizar</button>
         <button onclick="testAlert()" class="px-3.5 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 font-semibold text-xs">🔔 Probar Alerta</button>
         <a id="ntfyLink" href="https://ntfy.sh/hacienda-rag-manuel-9f4a2b" target="_blank" class="px-3.5 py-1.5 rounded-lg bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 border border-blue-500/40 font-semibold text-xs">📱 Abrir Canal Push (ntfy.sh) ↗</a>
