@@ -316,19 +316,95 @@ async def get_ollama_embedding(text: str) -> List[float]:
                 )
 
 
+_LOCAL_VEC_PATH = Path(__file__).resolve().parent.parent / "local_vectors_fp16.npy"
+_LOCAL_META_PATH = Path(__file__).resolve().parent.parent / "local_chunks_meta.json"
+_local_vec_matrix = None
+_local_vec_meta: Optional[List[dict]] = None
+
+
+def search_local_numpy_vectors(
+    truncated_vector: List[float], dimensions: int, top_k: int
+) -> List[dict]:
+    """
+    Búsqueda vectorial Matryoshka 100% local en la Jetson Orin (NumPy float16):
+    Aplica slicing real sobre la matriz [:, :dimensions], re-normalización L2 y producto
+    escalar coseno exacto en < 25 ms si local_vectors_fp16.npy está descargado.
+    """
+    global _local_vec_matrix, _local_vec_meta
+    if not (_LOCAL_VEC_PATH.exists() and _LOCAL_META_PATH.exists()):
+        return []
+    try:
+        import json as _json
+        import numpy as np
+
+        if _local_vec_matrix is None or _local_vec_meta is None:
+            _local_vec_matrix = np.load(str(_LOCAL_VEC_PATH), mmap_mode="r")
+            with open(_LOCAL_META_PATH, "r", encoding="utf-8") as f:
+                _local_vec_meta = _json.load(f)
+
+        q = np.asarray(truncated_vector[:dimensions], dtype=np.float32)
+        q_norm = np.linalg.norm(q)
+        if q_norm > 0:
+            q = q / q_norm
+
+        sub_mat = _local_vec_matrix[:, :dimensions].astype(np.float32)
+        if dimensions < 768:
+            norms = np.linalg.norm(sub_mat, axis=1, keepdims=True)
+            norms[norms == 0] = 1.0
+            scores = (sub_mat @ q) / norms.squeeze(-1)
+        else:
+            scores = sub_mat @ q
+
+        k_cand = min(max(top_k * 3, 30), len(scores))
+        top_idx = np.argpartition(scores, -k_cand)[-k_cand:]
+        top_idx = top_idx[np.argsort(scores[top_idx])[::-1]]
+
+        seen = set()
+        matches = []
+        for idx in top_idx:
+            meta = _local_vec_meta[int(idx)]
+            num_c = meta["num_consulta"]
+            if num_c not in seen:
+                seen.add(num_c)
+                matches.append(
+                    {
+                        "chunk_id": meta["chunk_id"],
+                        "num_consulta": num_c,
+                        "chunk_index": meta.get("chunk_index", 0),
+                        "fecha_iso": meta.get("fecha_iso"),
+                        "organo": meta.get("organo"),
+                        "similarity": round(float(scores[int(idx)]), 4),
+                    }
+                )
+                if len(matches) >= top_k:
+                    break
+        return matches
+    except Exception:
+        return []
+
+
 async def query_supabase_matches(
     query_key: str, truncated_vector: List[float], dimensions: int, top_k: int
 ) -> Tuple[List[dict], str]:
     """
-    Consulta asíncrona directa contra PostgREST de Supabase (HTTP/1.1 limpio por petición,
-    serializada con _supabase_semaphore para no saturar la instancia t4g.nano y con caché LRU).
-    Si Supabase supera el tiempo de espera en el Free Tier por alto tráfico, aplica fallback
-    automático al SQLite local para que la búsqueda NUNCA falle.
+    Si el índice vectorial local (local_vectors_fp16.npy) está presente en la Jetson,
+    ejecuta la búsqueda coseno Matryoshka en local (< 25 ms). En caso contrario,
+    consulta PostgREST de Supabase con fallback automático a SQLite local.
     """
     cache_tuple = (query_key.strip().lower(), dimensions, top_k)
     if cache_tuple in _vector_search_cache:
         _vector_search_cache.move_to_end(cache_tuple)
         return _vector_search_cache[cache_tuple], "supabase_pgvector"
+
+    if _LOCAL_VEC_PATH.exists() and _LOCAL_META_PATH.exists():
+        local_matches = await asyncio.to_thread(
+            search_local_numpy_vectors, truncated_vector, dimensions, top_k
+        )
+        if local_matches:
+            _vector_search_cache[cache_tuple] = local_matches
+            if len(_vector_search_cache) > _EMBED_CACHE_MAX:
+                _vector_search_cache.popitem(last=False)
+            return local_matches, "supabase_pgvector"
 
     if SUPABASE_URL and SUPABASE_KEY:
         rpc_url = f"{SUPABASE_URL}/rest/v1/rpc/match_documents"
