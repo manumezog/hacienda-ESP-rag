@@ -738,7 +738,13 @@ async def generate_llm_response(
 
     # 2. OpenRouter (sk-or-...)
     if openrouter_key:
-        or_models = [llm_model, "google/gemini-2.0-flash-001", "meta-llama/llama-3.3-70b-instruct:free", "openai/gpt-4o-mini"]
+        or_models = [
+            "deepseek/deepseek-v4.1-flash",
+            llm_model,
+            "google/gemini-2.0-flash-001",
+            "meta-llama/llama-3.3-70b-instruct:free",
+            "openai/gpt-4o-mini",
+        ]
         async with httpx.AsyncClient(timeout=25.0) as client:
             for or_m in dict.fromkeys(or_models):
                 try:
